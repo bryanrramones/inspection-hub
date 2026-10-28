@@ -1,10 +1,11 @@
 /* INSPECTION HUB service worker: keeps the app screens on the phone, and shows
    phone notifications sent by the engine through Firebase Cloud Messaging. */
+self.window = self; // config.js stores its settings on "window", which a service worker does not have
 importScripts('config.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
 
-var CACHE = 'inspection-hub-v3';
+var CACHE = 'inspection-hub-v4';
 var SHELL = ['./', './index.html', './app.css?v=3', './app.js?v=3', './config.js?v=3', './manifest.webmanifest',
   './icons/seal-512.png', './icons/seal-128.png', './icons/icon-192.png', './icons/favicon.png'];
 
