@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Inspection Hub</title>
+  <meta name="description" content="Inspection Team - Provincial Government of Quirino">
+  <meta name="theme-color" content="#0f4c2a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Inspection Hub">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/favicon.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="app.css?v=1">
+</head>
+<body>
+  <!-- FRONT PAGE / SIGN IN -->
+  <section id="front" class="front hidden">
+    <div class="front-top">
+      <img class="seal" src="icons/seal-512.png" alt="Official Seal of the Province of Quirino">
+      <div class="gov">Provincial Government of Quirino</div>
+      <h1 class="hub-title">INSPECTION HUB</h1>
+      <div class="team">The Inspection Team</div>
+    </div>
+    <div class="card signin">
+      <div id="stepEmail">
+        <label for="email">Your email</label>
+        <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="name@gmail.com">
+        <p class="hint">Use the email the Inspection Team has on file for you. We will send you a 6-digit code.</p>
+        <button id="btnCode" class="btn primary">Send my code</button>
+      </div>
+      <div id="stepCode" class="hidden">
+        <label for="code">6-digit code</label>
+        <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••">
+        <p class="hint" id="codeHint">Check your email for the code.</p>
+        <button id="btnVerify" class="btn primary">Sign in</button>
+        <button id="btnBack" class="btn link">Use a different email</button>
+      </div>
+    </div>
+    <p class="foot">Inspection Hotline 0965-516-0883</p>
+  </section>
+
+  <!-- APP -->
+  <section id="app" class="hidden">
+    <header class="bar">
+      <img src="icons/seal-128.png" alt="" class="bar-seal">
+      <div class="bar-text">
+        <div class="bar-title">INSPECTION HUB</div>
+        <div class="bar-sub" id="hello"></div>
+      </div>
+      <button class="icon-btn" id="btnMenu" aria-label="Menu">⋮</button>
+    </header>
+    <main id="view"></main>
+    <nav class="tabs" id="tabs"></nav>
+  </section>
+
+  <!-- SHEET (bottom drawer for forms and details) -->
+  <div id="scrim" class="scrim hidden"></div>
+  <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true"></div>
+  <div id="toast" class="toast hidden"></div>
+  <div id="busy" class="busy hidden"><div class="spinner"></div></div>
+
+  <script src="config.js?v=1"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>
