@@ -61,7 +61,7 @@
   function rangeText(a, b) { return !b || a === b ? niceYmd(a) : niceYmd(a) + ' to ' + niceYmd(b); }
   function t12(hm) { if (!hm) return ''; var t = hm.split(':'), h = +t[0]; return ((h + 11) % 12 + 1) + ':' + t[1] + (h < 12 ? ' AM' : ' PM'); }
   function initials(n) { return String(n || '?').replace(/^#/, '').split(/\s+/).filter(function (w) { return /^[A-Za-z]/.test(w) && w.length > 2; }).slice(0, 2).map(function (w) { return w[0]; }).join('').toUpperCase() || '?'; }
-  function title(n) { return String(n || '').toLowerCase().replace(/(^|[\s.-])([a-z])/g, function (m, a, b) { return a + b.toUpperCase(); }); }
+  function title(n) { return String(n || '').replace(/^#/, '').toLowerCase().replace(/(^|[\s.-])([a-z])/g, function (m, a, b) { return a + b.toUpperCase(); }); }
   function firstName(n) { var w = String(n || '').replace(/^#/, '').split(/\s+/)[0]; return title(w); }
   function dateBox(ms) {
     if (!ms) return '<div class="datebox"><div class="d">?</div></div>';
@@ -553,7 +553,7 @@
     var ask = Notification.permission === 'granted' ? Promise.resolve('granted') : Notification.requestPermission();
     ask.then(function (perm) {
       if (perm !== 'granted') { if (loud) toast('Notifications were not allowed.', true); refresh(); return; }
-      var waitReg = swReg ? Promise.resolve(swReg) : navigator.serviceWorker.ready;
+      var waitReg = navigator.serviceWorker.ready; // wait until the helper is fully started (first install)
       return waitReg.then(function (reg) {
         if (!messaging) { if (!firebase.apps.length) firebase.initializeApp(CFG.FIREBASE); messaging = firebase.messaging(); }
         return messaging.getToken({ vapidKey: CFG.VAPID_KEY, serviceWorkerRegistration: reg });
