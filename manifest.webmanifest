@@ -1,8 +1,9 @@
 {
+  "id": "./?hub=app",
   "name": "Inspection Hub - Provincial Government of Quirino",
   "short_name": "Inspection Hub",
   "description": "Inspection Team schedules, availability and assignments.",
-  "start_url": "./",
+  "start_url": "./?hub=app",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
