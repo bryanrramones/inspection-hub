@@ -652,6 +652,8 @@
       if (e.data && e.data.view && state.me && myTabs().indexOf(e.data.view) > -1) go(e.data.view);
     });
   }
+  /* Start the background helper right away, like Gabbrielle does, so the phone can install the app even before sign-in. */
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () { });
   state.token = store('get', KEY.token);
   try { state.me = JSON.parse(store('get', KEY.me) || 'null'); } catch (e) { state.me = null; }
   if (state.token && state.me) startApp(); else showFront();
