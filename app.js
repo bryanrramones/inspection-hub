@@ -351,6 +351,7 @@
       var html = pushBanner();
       html += '<h2 class="sec">Waiting for a decision (' + r.pending.length + ')</h2>';
       html += r.pending.length ? '<div class="list">' + r.pending.map(reqCard).join('') + '</div>' : '<div class="empty">All caught up. New requests will appear here, and you will get a notification.</div>';
+      if (r.olderUndecided) html += '<p class="hint">' + r.olderUndecided + ' older request' + (r.olderUndecided === 1 ? '' : 's') + ' with no decision (schedule passed more than 3 days ago) are not shown here. Close them out in the spreadsheet.</p>';
       if (r.decided.length) {
         html += '<h2 class="sec">Recently decided</h2><div class="list">' + r.decided.slice(0, 12).map(function (d) {
           return '<div class="item"><div class="item-top">' + dateBox(d.start) + '<div class="item-main"><div class="item-title">' + esc(d.office) + '</div>' +
