@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt' };
+  var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
 
@@ -172,6 +172,7 @@
     var want = (location.hash || '').replace('#', '');
     go(tabs.indexOf(want) > -1 ? want : tabs[0]);
     initPush();
+    if (isInstalled() && !store('get', KEY.installed)) { store('set', KEY.installed, '1'); toast('Inspection Hub is installed on this phone ✓'); }
     // refresh who I am in the background (roles may have changed)
     call('me', {}).then(function (r) {
       if (r.ok) { state.me = r.me; store('set', KEY.me, JSON.stringify(r.me)); }
@@ -212,10 +213,54 @@
       if (m === 'out') confirmBox('Sign out?', 'You will need a new code from your email to sign in again.', 'Sign out', 'Stay signed in', true).then(function (y) { if (y) signOut(); });
     };
   });
-  var deferredInstall = null;
-  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; });
+  /* ---------- installing on the phone, with clear confirmation ---------- */
+  var deferredInstall = null, installTimer = null;
+  function isInstalled() { return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; }
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; showInstallBar(); });
+  window.addEventListener('appinstalled', function () {
+    clearTimeout(installTimer); deferredInstall = null; hideInstallBar();
+    store('set', KEY.installed, '1');
+    closeSheet();
+    toast('Inspection Hub is installed. You will find it on your home screen.');
+    if ('Notification' in window && Notification.permission === 'granted' && navigator.serviceWorker) {
+      navigator.serviceWorker.ready.then(function (reg) {
+        reg.showNotification('Inspection Hub is installed', { body: 'Open it from your home screen.', icon: 'icons/icon-192.png', badge: 'icons/badge-96.png' });
+      }).catch(function () { });
+    }
+  });
+  function showInstallBar() {
+    if (isInstalled() || document.getElementById('installBar')) return;
+    var b = document.createElement('div');
+    b.id = 'installBar';
+    b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:15;max-width:520px;margin:0 auto;background:#fff;border:2px solid #f57c00;border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 20px rgba(0,0,0,.18)';
+    b.innerHTML = '<img src="icons/icon-192.png" alt="" style="width:36px;height:36px;border-radius:50%"><div style="flex:1;font-size:13.5px"><b>Install Inspection Hub</b><br>Put it on this phone\'s home screen.</div>' +
+      '<button class="btn primary" style="width:auto;padding:9px 14px;font-size:13.5px" id="installGo">Install</button><button style="background:none;border:0;font-size:22px;color:#5b6770" id="installX" aria-label="Not now">×</button>';
+    document.body.appendChild(b);
+    document.getElementById('installGo').onclick = startInstall;
+    document.getElementById('installX').onclick = hideInstallBar;
+  }
+  function hideInstallBar() { var b = document.getElementById('installBar'); if (b) b.remove(); }
+  function startInstall() {
+    if (!deferredInstall) return installHelp();
+    var p = deferredInstall; deferredInstall = null; hideInstallBar(); closeSheet();
+    p.prompt();
+    p.userChoice.then(function (c) {
+      if (!c || c.outcome !== 'accepted') { toast('Not installed. You can install it anytime from the ⋮ menu.'); return; }
+      toast('Installing… a message will appear here when it is done.');
+      clearTimeout(installTimer);
+      installTimer = setTimeout(installStuck, 90000);
+    });
+  }
+  function installStuck() {
+    if (isInstalled() || store('get', KEY.installed)) return;
+    openSheet('<h3>Still installing?</h3>' +
+      '<div class="note amber"><b>No confirmation yet.</b>Check the last page of your home screen and your app drawer for Inspection Hub.</div>' +
+      '<div class="note blue"><b>Xiaomi, Redmi, POCO, Oppo, Realme, Vivo</b>Settings → Apps → Chrome → Other permissions → allow <b>Home screen shortcuts</b>. Close Chrome, open this page again, then install.</div>' +
+      '<div class="note green"><b>Quick alternative</b>Chrome ⋮ → Add to Home screen → <b>Create shortcut</b>.</div>');
+  }
   function installHelp() {
-    if (deferredInstall) { closeSheet(); deferredInstall.prompt(); deferredInstall = null; return; }
+    if (isInstalled()) { openSheet('<h3>Already installed ✓</h3><div class="note green"><b>Inspection Hub is installed on this phone.</b>You are using the installed app right now.</div>'); return; }
+    if (deferredInstall) return startInstall();
     openSheet('<h3>Add to your home screen</h3>' +
       '<div class="note green"><b>Android (Chrome)</b>Tap the ⋮ menu at the top right, then <b>Add to Home screen</b> or <b>Install app</b>.</div>' +
       '<div class="note blue"><b>iPhone (Safari)</b>Tap the Share button, then <b>Add to Home Screen</b>. Notifications on iPhone only work after this step.</div>');
