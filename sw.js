@@ -5,9 +5,9 @@ importScripts('config.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
 
-var CACHE = 'inspection-hub-v6';
-var SHELL = ['./', './index.html', './app.css?v=5', './app.js?v=5', './config.js?v=5', './manifest.webmanifest',
-  './icons/seal-512.png', './icons/seal-128.png', './icons/icon-192.png', './icons/favicon.png'];
+var CACHE = 'inspection-hub-v7';
+var SHELL = ['./', './index.html', './app.css?v=6', './app.js?v=6', './config.js?v=6', './manifest.webmanifest',
+  './icons/seal-320.webp', './icons/seal-96.webp', './icons/icon-192.png', './icons/favicon.png'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).catch(function () { }).then(function () { return self.skipWaiting(); }));

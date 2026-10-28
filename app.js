@@ -113,6 +113,7 @@
     $('app').classList.add('hidden'); $('front').classList.remove('hidden');
     $('stepEmail').classList.remove('hidden'); $('stepCode').classList.add('hidden');
     $('email').value = store('get', KEY.email) || '';
+    homeBar();
   }
   $('btnCode').addEventListener('click', function () {
     var email = $('email').value.trim().toLowerCase();
@@ -172,6 +173,7 @@
     var want = (location.hash || '').replace('#', '');
     go(tabs.indexOf(want) > -1 ? want : tabs[0]);
     initPush();
+    homeBar();
     if (isInstalled() && !store('get', KEY.installed)) { store('set', KEY.installed, '1'); toast('Inspection Hub is installed on this phone ✓'); }
     // refresh who I am in the background (roles may have changed)
     call('me', {}).then(function (r) {
@@ -216,7 +218,7 @@
   /* ---------- installing on the phone, with clear confirmation ---------- */
   var deferredInstall = null, installTimer = null;
   function isInstalled() { return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; }
-  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; showInstallBar(); });
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; });
   window.addEventListener('appinstalled', function () {
     clearTimeout(installTimer); deferredInstall = null; hideInstallBar();
     store('set', KEY.installed, '1');
@@ -255,15 +257,41 @@
     if (isInstalled() || store('get', KEY.installed)) return;
     openSheet('<h3>Still installing?</h3>' +
       '<div class="note amber"><b>No confirmation yet.</b>Check the last page of your home screen and your app drawer for Inspection Hub.</div>' +
-      '<div class="note blue"><b>Xiaomi, Redmi, POCO, Oppo, Realme, Vivo</b>Settings → Apps → Chrome → Other permissions → allow <b>Home screen shortcuts</b>. Close Chrome, open this page again, then install.</div>' +
-      '<div class="note green"><b>Quick alternative</b>Chrome ⋮ → Add to Home screen → <b>Create shortcut</b>.</div>');
+      '<div class="note blue"><b>Xiaomi, Redmi, POCO, Oppo, Realme, Vivo</b>Settings → Apps → Chrome → Other permissions → allow <span style="font-weight:700">Home screen shortcuts</span>. Close Chrome, open this page again, then install.</div>' +
+      '<div class="note green"><b>Quick alternative</b>Chrome ⋮ → Add to Home screen → <span style="font-weight:700">Create shortcut</span>.</div>');
+  }
+  /* ---------- instant home-screen shortcut (no Google Play wait) ---------- */
+  function isAndroid() { return /Android/i.test(navigator.userAgent); }
+  function isIOS() { return /iPhone|iPad|iPod/i.test(navigator.userAgent); }
+  function homeBar() {
+    if (isInstalled() || store('get', KEY.installed) || store('get', 'hub.homeBarOff') || !(isAndroid() || isIOS())) return;
+    if (document.getElementById('installBar')) return;
+    var b = document.createElement('div');
+    b.id = 'installBar';
+    b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:15;max-width:520px;margin:0 auto;background:#fff;border:2px solid #f57c00;border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 20px rgba(0,0,0,.18)';
+    b.innerHTML = '<img src="icons/icon-192.png" alt="" style="width:36px;height:36px;border-radius:50%"><div style="flex:1;font-size:13.5px"><b>Add to your home screen</b><br>Takes 1 second.</div>' +
+      '<button class="btn primary" style="width:auto;padding:9px 14px;font-size:13.5px" id="installGo">How?</button><button style="background:none;border:0;font-size:22px;color:#5b6770" id="installX" aria-label="Not now">\u00d7</button>';
+    document.body.appendChild(b);
+    document.getElementById('installGo').onclick = homeGuide;
+    document.getElementById('installX').onclick = function () { store('set', 'hub.homeBarOff', String(Date.now())); hideInstallBar(); };
+  }
+  function homeGuide() {
+    var steps = isIOS()
+      ? ['Tap the <b>Share</b> button (square with an arrow) at the bottom of Safari.', 'Scroll down and tap <b>Add to Home Screen</b>.', 'Tap <b>Add</b>. The Inspection Hub icon appears right away.']
+      : ['Tap <b>\u22ee</b> at the <b>top-right</b> of Chrome.', 'Tap <b>Add to Home screen</b>.', 'Tap <b>Add</b>. The Inspection Hub icon appears right away.'];
+    openSheet('<h3>Add to your home screen</h3>' + steps.map(function (s, i) {
+      return '<div class="item" style="display:flex;gap:12px;align-items:center;margin-bottom:8px"><div class="avatar">' + (i + 1) + '</div><div>' + s + '</div></div>';
+    }).join('') +
+      (isIOS() ? '' : '<div class="note blue"><b>Xiaomi, Redmi, POCO, Oppo, Vivo</b>If no icon appears: Settings \u2192 Apps \u2192 Chrome \u2192 Other permissions \u2192 allow <span style="font-weight:700">Home screen shortcuts</span>, then try again.</div>') +
+      '<button class="btn primary" id="homeDone">Done, it is on my home screen</button><button class="btn link" data-close>Later</button>');
+    document.getElementById('homeDone').onclick = function () {
+      store('set', KEY.installed, '1'); hideInstallBar(); closeSheet();
+      toast('Great! From now on, open Inspection Hub from your home screen.');
+    };
   }
   function installHelp() {
     if (isInstalled()) { openSheet('<h3>Already installed ✓</h3><div class="note green"><b>Inspection Hub is installed on this phone.</b>You are using the installed app right now.</div>'); return; }
-    if (deferredInstall) return startInstall();
-    openSheet('<h3>Add to your home screen</h3>' +
-      '<div class="note green"><b>Android (Chrome)</b>Tap the ⋮ menu at the top right, then <b>Add to Home screen</b> or <b>Install app</b>.</div>' +
-      '<div class="note blue"><b>iPhone (Safari)</b>Tap the Share button, then <b>Add to Home Screen</b>. Notifications on iPhone only work after this step.</div>');
+    homeGuide();
   }
 
   /* ============ INSPECTOR: SCHEDULE ============ */
