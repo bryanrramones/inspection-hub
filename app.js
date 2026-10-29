@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '34';
+  var APP_VERSION = '35';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -1166,8 +1166,8 @@
       if (!r.ok) { closeSheet(); return toast(r.error, true); }
       var d = r.d;
       var F = [['datePrepared', 'Date prepared'], ['inspector', 'Inspector'], ['officialStation', 'Official station'], ['dateInspection', 'Date of inspection'],
-        ['destination', 'Destination'], ['returnDate', 'Date of return'], ['preparerName', 'Prepared by'], ['preparerDesignation', 'Designation'], ['lceName', 'Approved by'], ['lceDesignation', 'Designation']];
-      var vals = { officialStation: d.officialStation || d.office, returnDate: d.returnDate || 'same date' };
+        ['destination', 'Destination'], ['returnDate', 'Date of return'], ['purpose', 'Purpose of the trip'], ['preparerName', 'Prepared by'], ['preparerDesignation', 'Designation'], ['lceName', 'Approved by'], ['lceDesignation', 'Designation']];
+      var vals = { officialStation: d.officialStation || d.office, returnDate: d.returnDate || 'same date', purpose: d.purpose || 'Conduct of inspection of procured goods.' };
       var h = '<h3>Prepare Travel Order</h3><p class="hint" style="margin-top:-8px">' + esc(q.office) + ' · ' + esc(q.ref || '') + '. Check the details; the TO number is left blank to be filled in later.</p>' +
         F.map(function (f) { var v = vals[f[0]] !== undefined ? vals[f[0]] : (d[f[0]] || ''); return '<div class="field"><label>' + f[1] + '</label><input type="text" id="to_' + f[0] + '" value="' + esc(v) + '"></div>'; }).join('') +
         '<button class="btn primary" id="toMake">Create Travel Order (PDF)</button>' +
@@ -1551,15 +1551,20 @@
     });
   }
 
+  var apRemarks = '';
+  document.addEventListener('input', function (e) { if (e.target && e.target.id === 'apRemarks') apRemarks = e.target.value; });
   function approve(q, p, letter) {
+    if (!letter) apRemarks = '';
     var msg = 'Approve the request of <b>' + esc(q.office) + '</b> on <b>' + esc(q.dateText) + ' ' + esc(q.timeText) + '</b> and assign <b>' + esc(title(p.name)) + '</b>?' +
       '<div class="note green" style="margin-bottom:0"><b>These will receive an email right away:</b>Requestor: ' + esc(q.reqEmail) + '<br>Inspector: ' + esc(title(p.name)) + ' (' + esc(p.email) + ')<br>Commission on Audit</div>' +
       clashNote(p) +
+      '<div class="field" style="margin-top:12px"><label>Remarks to the requestor (optional)</label><textarea id="apRemarks" rows="3" maxlength="1000" placeholder="e.g. Please bring the original AIR and the delivery receipt."></textarea>' +
+      '<p class="hint" style="margin:4px 0 0">Added to the approval email sent to the requestor.</p></div>' +
       '<p class="hint">' + esc(firstName(p.name)) + ' will also get a phone notification. This cannot be undone.</p>';
     (letter ? Promise.resolve(true) : confirmBox('Approve and notify?', msg, 'Approve and send', 'Go back')).then(function (y) {
       if (!y) return;
       busy(true);
-      call('decide', { row: q.row, decision: 'Approved', inspector: p.name, inspectorEmail: p.email, letterConfirmed: letter }).then(function (r) {
+      call('decide', { row: q.row, decision: 'Approved', inspector: p.name, inspectorEmail: p.email, letterConfirmed: letter, remarks: apRemarks.trim() }).then(function (r) {
         busy(false);
         if (r.needLetter) {
           return confirmBox('Approved request letter?', '<div class="note amber" style="margin-top:0"><b>This falls outside normal working hours or days.</b>' + r.warnings.map(esc).join('<br>') + '</div>' +
