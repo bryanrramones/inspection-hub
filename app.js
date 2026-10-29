@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '33';
+  var APP_VERSION = '34';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -1097,6 +1097,99 @@
       });
     });
   }
+  function showDoc(d) {
+    var bin = atob(d.data), arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    var url = URL.createObjectURL(new Blob([arr], { type: d.mime }));
+    if (d.mime === 'application/pdf') {
+      var a = document.createElement('a'); a.href = url; a.download = d.name; a.target = '_blank'; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+      toast('Opening the PDF…');
+    } else viewDoc(url);
+  }
+  /* Phone photos are made smaller (still readable) before sending. */
+  function prepUpload(file) {
+    return new Promise(function (resolve, reject) {
+      if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        if (file.size > 10 * 1024 * 1024) return reject(new Error('The PDF is too large (10 MB at most).'));
+        var fr = new FileReader();
+        fr.onload = function () { resolve({ mime: 'application/pdf', data: String(fr.result).split(',')[1] }); };
+        fr.onerror = function () { reject(new Error('The file could not be read.')); }; fr.readAsDataURL(file); return;
+      }
+      var url = URL.createObjectURL(file), im = new Image();
+      im.onload = function () {
+        var k = Math.min(1, 2200 / Math.max(im.naturalWidth, im.naturalHeight));
+        var c = document.createElement('canvas'); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+        var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0, c.width, c.height);
+        resolve({ mime: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.85).split(',')[1] });
+      };
+      im.onerror = function () { reject(new Error('This photo could not be read. Please take it again.')); };
+      im.src = url;
+    });
+  }
+
+  /* ============ TRAVEL ORDER (optional, leaders) ============
+     Same template and PDF as the sheet menu. The TO number is left blank (filled in later).
+     Status: Prepared -> Signed (when a photo or PDF of the signed copy is uploaded). */
+  function toSection(q) {
+    if (!state.me.isLeader || q.action !== 'Approved') return '';
+    var st = String(q.toStatus || ''), signed = /^Signed/.test(st), prepared = !!q.to;
+    var h = '<h2 class="sec">Travel Order <span style="font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></h2>';
+    if (!prepared) return h + '<button class="btn ghost" id="toPrep">🧾 Prepare Travel Order</button>';
+    h += '<div class="note ' + (signed ? 'green' : 'blue') + '"><b>' + (signed ? '✔ Travel Order signed' : '🧾 Travel Order prepared - waiting for signature') + '</b>' + esc(st) +
+      '<div class="row2" style="margin-top:8px"><button class="btn ghost" id="toView">View TO (PDF)</button>' +
+      (signed ? '<button class="btn ghost" id="toViewSigned">View signed copy</button>' : '<button class="btn primary" id="toSign">Upload signed copy</button>') + '</div>' +
+      '<input type="file" id="toFile" accept="image/*,application/pdf" class="hidden"></div>' +
+      '<button class="btn link" id="toPrep">' + (signed ? 'Prepare a new Travel Order' : 'Prepare again (if details changed)') + '</button>';
+    return h;
+  }
+  function wireTo(q, back) {
+    if ($('toPrep')) $('toPrep').onclick = function () { toForm(q, back); };
+    if ($('toView')) $('toView').onclick = function () { toOpen(q, 'pdf'); };
+    if ($('toViewSigned')) $('toViewSigned').onclick = function () { toOpen(q, 'signed'); };
+    if ($('toSign')) $('toSign').onclick = function () { $('toFile').value = ''; $('toFile').click(); };
+    if ($('toFile')) $('toFile').onchange = function (e) {
+      var f = e.target.files && e.target.files[0]; if (!f) return;
+      busy(true);
+      prepUpload(f).then(function (d) { return call('toSigned', { row: q.row, mime: d.mime, data: d.data }); })
+        .then(function (r) { busy(false); if (!r.ok) return toast(r.error, true); toast('Signed copy saved. Travel Order marked as signed.'); closeSheet(); refresh(); },
+          function (err) { busy(false); toast(err.message, true); });
+    };
+  }
+  function toOpen(q, which) {
+    busy(true);
+    call('toFile', { row: q.row, which: which }).then(function (d) { busy(false); if (!d.ok) return toast(d.error, true); showDoc(d); });
+  }
+  function toForm(q, back) {
+    openSheet('<h3>Prepare Travel Order</h3><div class="empty">Loading…</div>');
+    call('toDefaults', { row: q.row }).then(function (r) {
+      if (!r.ok) { closeSheet(); return toast(r.error, true); }
+      var d = r.d;
+      var F = [['datePrepared', 'Date prepared'], ['inspector', 'Inspector'], ['officialStation', 'Official station'], ['dateInspection', 'Date of inspection'],
+        ['destination', 'Destination'], ['returnDate', 'Date of return'], ['preparerName', 'Prepared by'], ['preparerDesignation', 'Designation'], ['lceName', 'Approved by'], ['lceDesignation', 'Designation']];
+      var vals = { officialStation: d.officialStation || d.office, returnDate: d.returnDate || 'same date' };
+      var h = '<h3>Prepare Travel Order</h3><p class="hint" style="margin-top:-8px">' + esc(q.office) + ' · ' + esc(q.ref || '') + '. Check the details; the TO number is left blank to be filled in later.</p>' +
+        F.map(function (f) { var v = vals[f[0]] !== undefined ? vals[f[0]] : (d[f[0]] || ''); return '<div class="field"><label>' + f[1] + '</label><input type="text" id="to_' + f[0] + '" value="' + esc(v) + '"></div>'; }).join('') +
+        '<button class="btn primary" id="toMake">Create Travel Order (PDF)</button>' +
+        '<button class="btn link" id="toBack">← Back</button>';
+      openSheet(h);
+      $('toBack').onclick = back;
+      $('toMake').onclick = function () {
+        var fields = {}; F.forEach(function (f) { fields[f[0]] = $('to_' + f[0]).value; });
+        if (!fields.inspector.trim() || !fields.destination.trim()) return toast('Inspector and destination are needed.', true);
+        busy(true);
+        call('toCreate', { row: q.row, fields: fields }).then(function (r) {
+          busy(false);
+          if (!r.ok) return toast(r.error, true);
+          openSheet('<h3>🧾 Travel Order ready</h3><div class="note green"><b>Saved in the "Travel Orders" folder</b>Status: Prepared - waiting for signature. After it is signed, open this request and tap "Upload signed copy".' +
+            (r.warning ? '<br>' + esc(r.warning) : '') + '</div><button class="btn ghost" id="toView2">View TO (PDF)</button><div style="height:10px"></div><button class="btn primary" data-close>Done</button>');
+          $('toView2').onclick = function () { toOpen(q, 'pdf'); };
+          refresh();
+        });
+      };
+    });
+  }
+
   function airOpen(q, f) {
     var show = function (d) {
       var bin = atob(d.data), arr = new Uint8Array(bin.length);
@@ -1264,7 +1357,7 @@
           var open = d.action === 'Approved' && (!d.start || d.start > Date.now() - 12 * 36e5);
           return (open ? '<button class="item" data-row="' + d.row + '" data-re="1">' : '<div class="item">') + '<div class="item-top">' + dateBox(d.start) + '<div class="item-main"><div class="item-title">' + esc(d.office) + '</div>' +
             '<div class="item-sub">' + (d.action === 'Approved' ? '👤 ' + esc(title(d.inspectorName)) : '✖ ' + esc(d.deniedWhy || d.action)) + '</div>' +
-            '<div class="meta">' + (d.action === 'Cancelled' ? '<span class="chip red">Cancelled</span>' : d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector accepted</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet accepted</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + (d.photos && d.photoFolder ? '<a class="chip blue" target="_blank" rel="noopener" href="' + esc(d.photoFolder) + '">📷 ' + d.photos + ' photo' + (d.photos === 1 ? '' : 's') + '</a>' : '') + '</div></div></div>' + (open ? '</button>' : '</div>');
+            '<div class="meta">' + (d.action === 'Cancelled' ? '<span class="chip red">Cancelled</span>' : d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector accepted</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet accepted</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + (d.to ? (/^Signed/.test(d.toStatus) ? '<span class="chip green">🧾 TO signed</span>' : '<span class="chip blue">🧾 TO prepared</span>') : '') + (d.photos && d.photoFolder ? '<a class="chip blue" target="_blank" rel="noopener" href="' + esc(d.photoFolder) + '">📷 ' + d.photos + ' photo' + (d.photos === 1 ? '' : 's') + '</a>' : '') + '</div></div></div>' + (open ? '</button>' : '</div>');
         }).join('') + '</div>';
       }
       $('view').innerHTML = html;
@@ -1414,6 +1507,7 @@
         h += q.air ? '<div class="note green"><b>📎 Acceptance and Inspection Report attached</b>' + q.air + ' file' + (q.air === 1 ? '' : 's') + ' sent by the requestor.<button class="btn ghost" id="airBtn" style="margin-top:8px">📄 View AIR</button></div>'
           : '<div class="note red"><b>No AIR Attached</b>No Acceptance and Inspection Report has been sent yet. The requestor can send it here, no sign-in needed:<br><span style="word-break:break-all">' + esc(AIR_PAGE) + '</span><button class="btn ghost" id="airCopy" style="margin-top:8px">Copy link to send to the requestor</button></div>';
         if (q.warnings && q.warnings.length) h += '<div class="note amber"><b>Outside normal working hours/days</b>' + q.warnings.map(esc).join('<br>') + '<br>An approved request letter from the Local Chief Executive is needed.</div>';
+        if (reassign) h += toSection(q);
         if (reassign && q.response === 'Declined') h += '<div class="note red"><b>' + esc(title(q.inspectorName)) + ' can\'t do this inspection.</b>' + esc(q.respWhy || 'No reason given') + '<br>Choose a new inspector below, or cancel the inspection.</div>';
         else if (reassign) h += '<div class="note green"><b>Approved · ' + esc(q.ref || '') + '</b>Assigned to ' + esc(title(q.inspectorName)) + (q.response === 'Confirmed' ? ' (accepted)' : ' (not yet accepted)') + '. You can change the inspector or cancel the inspection.</div>';
         if (q.start && q.start < Date.now()) h += '<div class="note red"><b>The requested schedule has already passed.</b>Check with the requesting office before approving.</div>';
@@ -1451,6 +1545,7 @@
         if ($('holdBtn')) $('holdBtn').onclick = function () { holdForm(q); };
         if ($('airBtn')) $('airBtn').onclick = function () { airSheet(q, function () { openRequest(row, reassign); }); };
         if ($('airCopy')) $('airCopy').onclick = function () { copyText(AIR_PAGE); };
+        if (reassign) wireTo(q, function () { openRequest(row, reassign); });
       }
       draw();
     });
@@ -1614,10 +1709,13 @@
       (r.inspector ? '<dt>Inspector</dt><dd>' + esc(title(r.inspector)) + '</dd>' : '') + '</dl>';
     if (r.sent && r.sent.length) h += '<div class="note green"><b>Emails sent</b>' + r.sent.map(esc).join(', ') + '</div>';
     if (r.failed && r.failed.length) h += '<div class="note red"><b>Some emails did not go through</b>' + r.failed.map(esc).join('<br>') + '<br>Use "Send notification" in the spreadsheet for this row to resend.</div>';
-    if (r.travelOrder && r.travelOrder.length) h += '<div class="note blue"><b>Reminder: prepare a Travel Order</b>' + r.travelOrder.map(esc).join('<br>') +
-      '<br>In the spreadsheet: Inspection Team menu → Prepare Travel Order for selected row (row ' + q.row + ').</div>';
+    if (r.action === 'Approved') {
+      if (r.travelOrder && r.travelOrder.length) h += '<div class="note blue"><b>A Travel Order may be needed</b>' + r.travelOrder.map(esc).join('<br>') + '</div>';
+      h += '<button class="btn ghost" id="toPrep">🧾 Prepare Travel Order (optional)</button><div style="height:10px"></div>';
+    }
     h += '<button class="btn primary" data-close>Done</button>';
     openSheet(h);
+    if ($('toPrep')) $('toPrep').onclick = function () { toForm({ row: q.row, office: q.office, ref: r.ref, action: 'Approved' }, function () { closeSheet(); }); };
     refresh();
   }
 
