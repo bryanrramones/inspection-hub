@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '32';
+  var APP_VERSION = '33';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -1657,6 +1657,33 @@
     wireStatusPage(p, s);
   }
 
+  /* ---------- notification chime (played when a notification arrives while the app is open) ----------
+     A soft two-note chime made by the phone itself (no sound file to download). Phones only allow
+     sound after the user has touched the app once, so the sound is "unlocked" on the first tap. */
+  var audioCtx = null;
+  function audio() {
+    if (!audioCtx) { var A = window.AudioContext || window.webkitAudioContext; if (!A) return null; try { audioCtx = new A(); } catch (e) { return null; } }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  document.addEventListener('pointerdown', function unlock() { audio(); document.removeEventListener('pointerdown', unlock); }, { once: true });
+  function chime() {
+    var ctx = audio(); if (!ctx) return;
+    var t0 = ctx.currentTime + 0.02;
+    [[659.25, 0, 0.45, 0.25], [880, 0.45, 0.9, 0.45]].forEach(function (n) {
+      var g = ctx.createGain(); g.connect(ctx.destination);
+      var start = t0 + n[1];
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.exponentialRampToValueAtTime(0.35, start + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + n[2]);
+      [[1, 1], [2, 0.25], [3, 0.08]].forEach(function (h) {
+        var o = ctx.createOscillator(), hg = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = n[0] * h[0]; hg.gain.value = h[1] / 1.33;
+        o.connect(hg); hg.connect(g); o.start(start); o.stop(start + n[2] + 0.05);
+      });
+    });
+  }
+
   /* ============ PHONE NOTIFICATIONS ============ */
   var swReg = null, messaging = null;
   function pushReady() { return !!(CFG.FIREBASE && CFG.VAPID_KEY && window.firebase && 'serviceWorker' in navigator && 'Notification' in window); }
@@ -1674,6 +1701,7 @@
       try { if (!firebase.apps.length) firebase.initializeApp(CFG.FIREBASE); messaging = firebase.messaging(); } catch (e) { return; }
       messaging.onMessage(function (payload) {
         var d = (payload && payload.data) || {};
+        chime();
         toast((d.title ? d.title + ' - ' : '') + (d.body || ''));
         refresh();
         if (state.tab !== 'notifs') checkNotifs();

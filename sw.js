@@ -5,8 +5,8 @@ importScripts('config.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
 
-var CACHE = 'inspection-hub-v33';
-var SHELL = ['./', './index.html', './app.css?v=32', './app.js?v=32', './config.js?v=32', './manifest.webmanifest',
+var CACHE = 'inspection-hub-v34';
+var SHELL = ['./', './index.html', './app.css?v=33', './app.js?v=33', './config.js?v=33', './manifest.webmanifest',
   './icons/seal-320.webp', './icons/seal-96.webp', './icons/icon-192.png', './icons/favicon.png'];
 
 self.addEventListener('install', function (e) {
@@ -39,7 +39,6 @@ if (CFG.FIREBASE) {
         icon: 'icons/icon-192.png',
         badge: 'icons/badge-96.png',
         tag: (d.view || 'hub') + '-' + Date.now(),
-        vibrate: [200, 100, 200],
         data: { view: d.view || '' }
       });
     });
