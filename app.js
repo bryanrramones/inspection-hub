@@ -488,12 +488,16 @@
   var geo = { fix: null, watch: null, place: '', placeFor: '' };
   var shots = {};            // row -> [{ url, status }] photos taken while the app is open
   var sealImg = null;
-  function loadSeal() {
+  function loadSeal(tries) {
     if (sealImg) return Promise.resolve(sealImg);
-    return new Promise(function (res) {
-      var i = new Image(); i.onload = function () { sealImg = i; res(i); }; i.onerror = function () { res(null); };
-      i.src = 'icons/seal-320.webp';
-    });
+    tries = tries == null ? 3 : tries;
+    return fetch('icons/seal-320.webp').then(function (r) { if (!r.ok) throw new Error('seal'); return r.blob(); })
+      .then(function (b) { return createImageBitmap(b); })
+      .then(function (bm) { sealImg = bm; return bm; })
+      .catch(function () {
+        if (tries <= 0) return null;
+        return new Promise(function (res) { setTimeout(res, 700); }).then(function () { return loadSeal(tries - 1); });
+      });
   }
   function geoStart(onUpdate) {
     geoStop();
@@ -533,7 +537,7 @@
       var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
       var g = cv.getContext('2d');
       g.drawImage(img, 0, 0, W, H);
-      var base = Math.min(W, H), fs = Math.max(11, Math.round(base * 0.0165)), lh = Math.round(fs * 1.3), pad = Math.round(fs * 0.7), m = Math.round(base * 0.025);
+      var base = Math.min(W, H), fs = Math.max(14, Math.round(base * 0.03)), lh = Math.round(fs * 1.32), pad = Math.round(fs * 0.8);
       var lines = [
         { t: 'PROVINCIAL GOVERNMENT OF QUIRINO', b: true, c: '#ffb74d' },
         { t: 'INSPECTION TEAM', b: true, c: '#ffffff' },
@@ -543,25 +547,22 @@
         { t: dms(fix.lat, 'N', 'S') + ', ' + dms(fix.lng, 'E', 'W') + '  (±' + fix.acc + ' m)', c: '#ffe0b2' },
         { t: place || 'Place name not available (no signal)', c: '#ffe0b2' }
       ];
-      function font(L) { return (L.b ? '700 ' : '400 ') + fs + 'px Roboto, "Segoe UI", Arial, sans-serif'; }
-      var boxH = pad * 2 + lh * lines.length - Math.round(lh - fs);
-      var sealS = seal ? boxH - pad * 2 : 0, tx = pad + (seal ? sealS + pad : 0) + Math.round(fs * 0.25);
-      var maxText = Math.round(W * 0.62) - tx - pad, textW = 0;
-      lines.forEach(function (L) { g.font = font(L); textW = Math.max(textW, Math.min(maxText, g.measureText(L.t).width)); });
-      var boxW = tx + textW + pad, x0 = m, y0 = H - m - boxH, r = Math.round(fs * 0.6);
-      g.fillStyle = 'rgba(0,0,0,0.58)';
-      g.beginPath();
-      if (g.roundRect) g.roundRect(x0, y0, boxW, boxH, r); else g.rect(x0, y0, boxW, boxH);
-      g.fill();
-      g.fillStyle = '#f57c00'; g.fillRect(x0, y0 + r, Math.max(3, Math.round(fs * 0.25)), boxH - 2 * r);
-      if (seal) g.drawImage(seal, x0 + pad + Math.round(fs * 0.25), y0 + pad, sealS, sealS);
+      var bandH = pad * 2 + lh * lines.length;
+      var grd = g.createLinearGradient(0, H - bandH, 0, H);
+      grd.addColorStop(0, 'rgba(0,0,0,0.55)'); grd.addColorStop(1, 'rgba(0,0,0,0.75)');
+      g.fillStyle = grd; g.fillRect(0, H - bandH, W, bandH);
+      g.fillStyle = '#f57c00'; g.fillRect(0, H - bandH, W, Math.max(4, Math.round(fs * 0.22)));
+      var sealS = Math.round(Math.min(bandH - pad * 2, W * 0.22)), x = pad;
+      if (seal) { g.drawImage(seal, pad, H - bandH + (bandH - sealS) / 2, sealS, sealS); x = pad * 2 + sealS; }
+      var maxW = W - x - pad;
       g.textBaseline = 'top';
-      g.shadowColor = 'rgba(0,0,0,0.6)'; g.shadowBlur = Math.round(fs * 0.12);
+      g.shadowColor = 'rgba(0,0,0,0.6)'; g.shadowBlur = Math.round(fs * 0.15);
       lines.forEach(function (L, i) {
-        g.font = font(L); g.fillStyle = L.c;
+        g.font = (L.b ? '700 ' : '400 ') + fs + 'px Roboto, "Segoe UI", Arial, sans-serif';
+        g.fillStyle = L.c;
         var t = L.t;
-        if (g.measureText(t).width > maxText) { while (t.length > 4 && g.measureText(t + '…').width > maxText) t = t.slice(0, -1); t += '…'; }
-        g.fillText(t, x0 + tx, y0 + pad + i * lh);
+        if (g.measureText(t).width > maxW) { while (t.length > 4 && g.measureText(t + '…').width > maxW) t = t.slice(0, -1); t += '…'; }
+        g.fillText(t, x, H - bandH + pad + i * lh);
       });
       return new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.88); });
     }).then(function (blob) { return blob.arrayBuffer(); }).then(function (buf) {
@@ -685,6 +686,7 @@
   function photoSheet(j) {
     if (!j) return;
     if (photoCount[j.row] == null) photoCount[j.row] = j.photos || 0;
+    loadSeal();
     var geoMsg = '';
     function draw() {
       var list = shots[j.row] || [];
