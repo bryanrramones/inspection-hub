@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '22';
+  var APP_VERSION = '24';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -344,9 +344,9 @@
     });
   }
   function respChip(j) {
-    if (j.response === 'Confirmed') return '<span class="chip green">✔ Confirmed</span>';
+    if (j.response === 'Confirmed') return '<span class="chip green">✔ Accepted</span>';
     if (j.response === 'Declined') return '<span class="chip red">You can\'t make it - waiting for a new inspector</span>';
-    return '<span class="chip amber">Please confirm</span>';
+    return '<span class="chip amber">Please accept or decline</span>';
   }
   function confirmJob(j) {
     if (!j) return;
@@ -354,7 +354,7 @@
     call('respond', { row: j.row, answer: 'confirm' }).then(function (r) {
       busy(false);
       if (!r.ok) return toast(r.error, true);
-      toast('Confirmed. Thank you!'); refresh();
+      toast('Accepted. Thank you!'); refresh();
     });
   }
   function cantForm(j) {
@@ -406,23 +406,38 @@
       (/NO REPORT/.test(f) ? '<span class="chip amber">Report not uploaded</span>' :
         (f === 'REJECTED' ? '<span class="chip red">Rejected</span>' : '<span class="chip">' + esc(f) + '</span>')));
     var past = j.start && j.start < Date.now();
-    var filed = f && !/No findings/i.test(f), due = !j.start || j.start <= Date.now() + 2 * 36e5;
-    var cal = past ? '' : '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(j.calendarLink) + '">Add to Calendar</a>';
-    var doneBtn = !due ? '' : (!filed ? '<button class="btn primary" data-done="' + j.row + '">✔ Done</button>'
-      : (/NO REPORT/.test(f) ? '<button class="btn ghost" data-done="' + j.row + '">📄 Add A&amp;I report</button>' : ''));
-    return '<div class="item"><div class="item-top">' + dateBox(j.start) +
+    var filed = f && !/No findings/i.test(f), noReport = /NO REPORT/.test(f);
+    var due = !j.start || j.start <= Date.now() + 2 * 36e5;
+    var accepted = j.response === 'Confirmed', declined = j.response === 'Declined';
+    var head = '<div class="item"><div class="item-top">' + dateBox(j.start) +
       '<div class="item-main"><div class="item-title">' + esc(j.office) + '</div>' +
       '<div class="item-sub">🕘 ' + esc(j.timeText || 'Time not stated') + '</div>' +
       '<div class="item-sub">📍 ' + esc(j.place || 'Venue not stated') + '</div>' +
       '<div class="item-sub">📦 ' + esc(j.goods || '') + '</div>' +
       (j.rep ? '<div class="item-sub">👤 ' + esc(j.rep) + (j.repContact ? ' · <a class="inline" href="tel:' + esc(String(j.repContact).replace(/[^\d+]/g, '')) + '">' + esc(j.repContact) + '</a>' : '') + '</div>' : '') +
-      '<div class="meta">' + (past ? '' : respChip(j)) + '<span class="chip gold">' + esc(j.ref) + '</span>' + (j.amountText ? '<span class="chip">' + esc(j.amountText) + '</span>' : '') + fchip + '</div>' +
-      '</div></div>' +
-      (!past && !j.response ? '<div class="actions"><button class="btn ghost" data-cant="' + j.row + '" style="color:var(--red);border-color:var(--red)">I can\'t right now</button>' +
-        '<button class="btn primary" data-confirm="' + j.row + '">✔ Confirm</button></div>' : '') +
-      (!past && j.response === 'Confirmed' ? '<div class="actions" style="margin-top:6px"><button class="btn link" data-cant="' + j.row + '" style="color:var(--red);margin:0;padding:6px">Can\'t make it anymore?</button></div>' : '') +
-      (j.response === 'Declined' || !(cal + doneBtn) ? '' : '<div class="actions">' + cal + doneBtn + '</div>') +
-      (j.response === 'Declined' ? '' : '<div class="actions"><button class="btn ghost" data-photo="' + j.row + '">📷 Geotagged photos' + (j.photos ? ' · ' + j.photos + ' saved' : '') + '</button></div>') + '</div>';
+      '<div class="meta">' + (filed ? '' : respChip(j)) + '<span class="chip gold">' + esc(j.ref) + '</span>' + (j.amountText ? '<span class="chip">' + esc(j.amountText) + '</span>' : '') + fchip + '</div>' +
+      '</div></div>';
+    var body = '';
+    if (declined) {
+      body = '';
+    } else if (!accepted && !filed) {
+      /* Step 1: accept or not */
+      body = '<div class="actions"><button class="btn ghost" data-cant="' + j.row + '" style="color:var(--red);border-color:var(--red)">I can\'t right now</button>' +
+        '<button class="btn primary" data-confirm="' + j.row + '">✔ I accept this assignment</button></div>';
+    } else {
+      /* Step 2: report, then photos */
+      if (!filed) {
+        body += '<div class="actions"><button class="btn primary" data-done="' + j.row + '"' + (due ? '' : ' disabled') + '>✔ Done, proceed with report</button></div>' +
+          (due ? '' : '<p class="hint" style="text-align:center;margin:4px 0 0">Available from 2 hours before the inspection.</p>');
+      } else if (noReport) {
+        body += '<div class="actions"><button class="btn ghost" data-done="' + j.row + '">📄 Add A&amp;I report</button></div>';
+      }
+      body += '<div class="actions"><button class="btn ghost" data-photo="' + j.row + '"' + (filed ? '' : ' disabled') + '>📷 Attach geotagged photos' + (j.photos ? ' · ' + j.photos + ' saved' : '') + '</button></div>' +
+        (filed ? '' : '<p class="hint" style="text-align:center;margin:4px 0 0">Photos open after you submit the report.</p>');
+      if (!past && !filed) body += '<div class="actions" style="margin-top:6px"><a class="btn link" target="_blank" rel="noopener" href="' + esc(j.calendarLink) + '" style="margin:0;padding:6px">Add to Calendar</a>' +
+        '<button class="btn link" data-cant="' + j.row + '" style="color:var(--red);margin:0;padding:6px">Can\'t make it anymore?</button></div>';
+    }
+    return head + body + '</div>';
   }
 
   /* ============ NOTIFICATIONS (history of everything sent to me) ============ */
@@ -1063,7 +1078,7 @@
           var open = d.action === 'Approved' && (!d.start || d.start > Date.now() - 12 * 36e5);
           return (open ? '<button class="item" data-row="' + d.row + '" data-re="1">' : '<div class="item">') + '<div class="item-top">' + dateBox(d.start) + '<div class="item-main"><div class="item-title">' + esc(d.office) + '</div>' +
             '<div class="item-sub">' + (d.action === 'Approved' ? '👤 ' + esc(title(d.inspectorName)) : '✖ ' + esc(d.deniedWhy || d.action)) + '</div>' +
-            '<div class="meta">' + (d.action === 'Cancelled' ? '<span class="chip red">Cancelled</span>' : d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector confirmed</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet confirmed</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + (d.photos && d.photoFolder ? '<a class="chip blue" target="_blank" rel="noopener" href="' + esc(d.photoFolder) + '">📷 ' + d.photos + ' photo' + (d.photos === 1 ? '' : 's') + '</a>' : '') + '</div></div></div>' + (open ? '</button>' : '</div>');
+            '<div class="meta">' + (d.action === 'Cancelled' ? '<span class="chip red">Cancelled</span>' : d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector accepted</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet accepted</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + (d.photos && d.photoFolder ? '<a class="chip blue" target="_blank" rel="noopener" href="' + esc(d.photoFolder) + '">📷 ' + d.photos + ' photo' + (d.photos === 1 ? '' : 's') + '</a>' : '') + '</div></div></div>' + (open ? '</button>' : '</div>');
         }).join('') + '</div>';
       }
       $('view').innerHTML = html;
@@ -1114,7 +1129,7 @@
           '<dt>Sheet row</dt><dd>' + q.row + '</dd></dl>';
         if (q.warnings && q.warnings.length) h += '<div class="note amber"><b>Outside normal working hours/days</b>' + q.warnings.map(esc).join('<br>') + '<br>An approved request letter from the Local Chief Executive is needed.</div>';
         if (reassign && q.response === 'Declined') h += '<div class="note red"><b>' + esc(title(q.inspectorName)) + ' can\'t do this inspection.</b>' + esc(q.respWhy || 'No reason given') + '<br>Choose a new inspector below, or cancel the inspection.</div>';
-        else if (reassign) h += '<div class="note green"><b>Approved · ' + esc(q.ref || '') + '</b>Assigned to ' + esc(title(q.inspectorName)) + (q.response === 'Confirmed' ? ' (confirmed)' : ' (not yet confirmed)') + '. You can change the inspector or cancel the inspection.</div>';
+        else if (reassign) h += '<div class="note green"><b>Approved · ' + esc(q.ref || '') + '</b>Assigned to ' + esc(title(q.inspectorName)) + (q.response === 'Confirmed' ? ' (accepted)' : ' (not yet accepted)') + '. You can change the inspector or cancel the inspection.</div>';
         if (q.start && q.start < Date.now()) h += '<div class="note red"><b>The requested schedule has already passed.</b>Check with the requesting office before approving.</div>';
         h += '<h2 class="sec">Team ' + esc(q.goodsCode || '?') + ' · ' + esc(r.team) + '</h2>';
         if (r.match.length) h += '<div class="list">' + r.match.map(function (p, i) { return personRow(p, i, 'm'); }).join('') + '</div>';
@@ -1153,7 +1168,7 @@
 
   function approve(q, p, letter) {
     var msg = 'Approve the request of <b>' + esc(q.office) + '</b> on <b>' + esc(q.dateText) + ' ' + esc(q.timeText) + '</b> and assign <b>' + esc(title(p.name)) + '</b>?' +
-      '<div class="note green" style="margin-bottom:0"><b>These will receive an email right away:</b>Requestor: ' + esc(q.reqEmail) + '<br>Inspector: ' + esc(title(p.name)) + ' (' + esc(p.email) + ')<br>Commission on Audit<br>Monitoring copy</div>' +
+      '<div class="note green" style="margin-bottom:0"><b>These will receive an email right away:</b>Requestor: ' + esc(q.reqEmail) + '<br>Inspector: ' + esc(title(p.name)) + ' (' + esc(p.email) + ')<br>Commission on Audit</div>' +
       clashNote(p) +
       '<p class="hint">' + esc(firstName(p.name)) + ' will also get a phone notification. This cannot be undone.</p>';
     (letter ? Promise.resolve(true) : confirmBox('Approve and notify?', msg, 'Approve and send', 'Go back')).then(function (y) {
@@ -1179,7 +1194,7 @@
   }
   function reassignTo(q, p) {
     var msg = 'Assign <b>' + esc(title(p.name)) + '</b> to <b>' + esc(q.office) + '</b> on <b>' + esc(q.dateText) + ' ' + esc(q.timeText) + '</b> in place of ' + esc(title(q.inspectorName)) + '?' +
-      '<div class="note green" style="margin-bottom:0"><b>These will receive an email right away:</b>New inspector: ' + esc(title(p.name)) + ' (' + esc(p.email) + ')<br>Requestor (updated notice): ' + esc(q.reqEmail) + '<br>Commission on Audit (updated notice)<br>Monitoring copy</div>' +
+      '<div class="note green" style="margin-bottom:0"><b>These will receive an email right away:</b>New inspector: ' + esc(title(p.name)) + ' (' + esc(p.email) + ')<br>Requestor (updated notice): ' + esc(q.reqEmail) + '<br>Commission on Audit (updated notice)</div>' +
       clashNote(p) +
       '<p class="hint">' + esc(firstName(p.name)) + ' will also get a phone notification and will be asked to confirm.</p>';
     confirmBox('Assign new inspector?', msg, 'Assign and send', 'Go back').then(function (y) {
@@ -1209,7 +1224,7 @@
       if (!reason) return toast('Please state the reason.', true);
       confirmBox('Cancel this inspection?',
         'The approved inspection of <b>' + esc(q.office) + '</b> on <b>' + esc(q.dateText) + ' ' + esc(q.timeText) + '</b> will be marked <b>Cancelled</b>.' +
-        '<div class="note red" style="margin-bottom:0"><b>These will receive a cancellation email right away:</b>Requestor: ' + esc(q.reqEmail) + '<br>Commission on Audit<br>Monitoring copy</div>' +
+        '<div class="note red" style="margin-bottom:0"><b>These will receive a cancellation email right away:</b>Requestor: ' + esc(q.reqEmail) + '<br>Commission on Audit</div>' +
         '<p class="hint">' + esc(title(q.inspectorName)) + ' will get a phone notification. This cannot be undone.</p>',
         'Cancel and send', 'Go back', true).then(function (y) {
           if (!y) return;
