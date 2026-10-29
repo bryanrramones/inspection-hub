@@ -890,7 +890,8 @@
       function personRow(p, i, group) {
         return '<button class="item pick" data-pick="' + group + ':' + i + '"><div class="person"><div class="radio"></div><div class="avatar">' + initials(p.name) + '</div>' +
           '<div class="item-main"><div class="item-title">' + esc(title(p.name)) + '</div>' +
-          '<div class="load">' + esc(p.office) + ' · Team ' + esc(p.teams.join(', ')) + ' · ' + p.load + ' inspection' + (p.load === 1 ? '' : 's') + ' in 30 days</div></div></div></button>';
+          '<div class="load">' + esc(p.office) + ' · Team ' + esc(p.teams.join(', ')) + ' · ' + p.load + ' inspection' + (p.load === 1 ? '' : 's') + ' in 30 days</div>' +
+          (p.clash ? '<div class="clash">⚠ ' + esc(p.clash) + '</div>' : '') + '</div></div></button>';
       }
       function draw() {
         var h = '<h3>' + esc(q.office) + '</h3>' +
@@ -924,7 +925,7 @@
           '<p class="hint" style="text-align:center">' + (sel ? 'Assigning ' + esc(title(sel.name)) : 'Choose the new inspector') + '</p>';
         else h += '<div style="height:16px"></div><div class="row2"><button class="btn ghost" id="denyBtn" style="color:var(--red);border-color:var(--red)">Deny</button>' +
           '<button class="btn primary" id="approveBtn"' + (sel ? '' : ' disabled') + '>Approve</button></div>' +
-          '<p class="hint" style="text-align:center">' + (sel ? 'Assigning ' + esc(title(sel.name)) : 'Choose an inspector to approve') + '</p>';
+          '<p class="hint" style="text-align:center">' + (sel ? 'Assigning ' + esc(title(sel.name)) + (sel.clash ? ' · <span style="color:#a15c00">⚠ has another inspection around this time</span>' : '') : 'Choose an inspector to approve') + '</p>';
         var s = openSheet(h);
         Array.prototype.forEach.call(s.querySelectorAll('[data-pick]'), function (b) {
           var k = b.getAttribute('data-pick').split(':'), p = (k[0] === 'm' ? r.match : r.others)[+k[1]];
@@ -942,6 +943,7 @@
   function approve(q, p, letter) {
     var msg = 'Approve the request of <b>' + esc(q.office) + '</b> on <b>' + esc(q.dateText) + ' ' + esc(q.timeText) + '</b> and assign <b>' + esc(title(p.name)) + '</b>?' +
       '<div class="note green" style="margin-bottom:0"><b>These will receive an email right away:</b>Requestor: ' + esc(q.reqEmail) + '<br>Inspector: ' + esc(title(p.name)) + ' (' + esc(p.email) + ')<br>Commission on Audit<br>Monitoring copy</div>' +
+      clashNote(p) +
       '<p class="hint">' + esc(firstName(p.name)) + ' will also get a phone notification. This cannot be undone.</p>';
     (letter ? Promise.resolve(true) : confirmBox('Approve and notify?', msg, 'Approve and send', 'Go back')).then(function (y) {
       if (!y) return;
@@ -960,9 +962,14 @@
       });
     });
   }
+  function clashNote(p) {
+    return p.clash ? '<div class="note amber"><b>Heads up: ' + esc(title(p.name)) + ' has another inspection around this time.</b>' + esc(p.clash) +
+      '<br>You can still assign, for example if both inspections can be done in one trip.</div>' : '';
+  }
   function reassignTo(q, p) {
     var msg = 'Assign <b>' + esc(title(p.name)) + '</b> to <b>' + esc(q.office) + '</b> on <b>' + esc(q.dateText) + ' ' + esc(q.timeText) + '</b> in place of ' + esc(title(q.inspectorName)) + '?' +
       '<div class="note green" style="margin-bottom:0"><b>These will receive an email right away:</b>New inspector: ' + esc(title(p.name)) + ' (' + esc(p.email) + ')<br>Requestor (updated notice): ' + esc(q.reqEmail) + '<br>Commission on Audit (updated notice)<br>Monitoring copy</div>' +
+      clashNote(p) +
       '<p class="hint">' + esc(firstName(p.name)) + ' will also get a phone notification and will be asked to confirm.</p>';
     confirmBox('Assign new inspector?', msg, 'Assign and send', 'Go back').then(function (y) {
       if (!y) return;
