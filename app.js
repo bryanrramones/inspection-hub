@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '21';
+  var APP_VERSION = '22';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -420,6 +420,7 @@
       '</div></div>' +
       (!past && !j.response ? '<div class="actions"><button class="btn ghost" data-cant="' + j.row + '" style="color:var(--red);border-color:var(--red)">I can\'t right now</button>' +
         '<button class="btn primary" data-confirm="' + j.row + '">✔ Confirm</button></div>' : '') +
+      (!past && j.response === 'Confirmed' ? '<div class="actions" style="margin-top:6px"><button class="btn link" data-cant="' + j.row + '" style="color:var(--red);margin:0;padding:6px">Can\'t make it anymore?</button></div>' : '') +
       (j.response === 'Declined' || !(cal + doneBtn) ? '' : '<div class="actions">' + cal + doneBtn + '</div>') +
       (j.response === 'Declined' ? '' : '<div class="actions"><button class="btn ghost" data-photo="' + j.row + '">📷 Geotagged photos' + (j.photos ? ' · ' + j.photos + ' saved' : '') + '</button></div>') + '</div>';
   }
