@@ -157,13 +157,16 @@
     requests: { label: 'Requests', ic: '📥', render: renderRequests },
     team: { label: 'Team', ic: '👥', render: renderTeam },
     schedule: { label: 'Schedule', ic: '📅', render: renderSchedule },
-    status: { label: 'My Status', ic: '🟢', render: renderStatus }
+    status: { label: 'My Status', ic: '🟢', render: renderStatus },
+    notifs: { label: 'Notifications', ic: '🔔', render: renderNotifs }
   };
   function myTabs() {
     var t = [];
     if (state.me.isLeader) t.push('requests', 'team');
     if (state.me.isInspector) t.push('schedule', 'status');
-    return t.length ? t : ['status'];
+    if (!t.length) t.push('status');
+    t.push('notifs');
+    return t;
   }
   function startApp() {
     $('front').classList.add('hidden'); $('app').classList.remove('hidden');
@@ -177,6 +180,7 @@
     initPush();
     homeBar();
     setTimeout(uploadQueue, 1500);
+    checkNotifs();
     if (isInstalled() && !store('get', KEY.installed)) { store('set', KEY.installed, '1'); toast('Inspection Hub is installed on this phone ✓'); }
     // refresh who I am in the background (roles may have changed)
     call('me', {}).then(function (r) {
@@ -411,6 +415,64 @@
       (past ? '' : '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(j.calendarLink) + '">Add to Calendar</a>') +
       '<a class="btn primary" target="_blank" rel="noopener" href="' + esc(j.findingsLink) + '">File findings</a></div>') +
       (j.response === 'Declined' ? '' : '<div class="actions"><button class="btn ghost" data-photo="' + j.row + '">📷 Geotagged photos' + (j.photos ? ' · ' + j.photos + ' saved' : '') + '</button></div>') + '</div>';
+  }
+
+  /* ============ NOTIFICATIONS (history of everything sent to me) ============ */
+  var NKEY = 'hub.notifSeen';
+  function notifIcon(n) {
+    var t = String(n.title || '');
+    if (/cancel/i.test(t)) return '🚫';
+    if (/declin|can't|new inspector|not yet confirmed/i.test(t)) return '⚠️';
+    if (/confirm/i.test(t)) return '⏰';
+    if (/photo/i.test(t)) return '📷';
+    if (/status/i.test(t)) return '🟢';
+    if (n.view === 'schedule') return '📅';
+    if (n.view === 'requests') return '📥';
+    return '🔔';
+  }
+  function whenText(t) {
+    if (!t) return '';
+    var mins = Math.round((Date.now() - t) / 6e4);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + ' min ago';
+    if (mins < 360) return Math.round(mins / 60) + ' h ago';
+    return new Date(t).toLocaleString('en-US', { timeZone: TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+  function setNotifDot(n) {
+    var dot = $('dot-notifs');
+    if (dot) { dot.textContent = n > 99 ? '99+' : n; dot.classList.toggle('hidden', !n); }
+  }
+  function checkNotifs() {
+    call('notifications', {}).then(function (r) {
+      if (!r.ok) return;
+      var seen = +(store('get', NKEY) || 0);
+      setNotifDot(r.items.filter(function (n) { return n.t > seen; }).length);
+    });
+  }
+  function renderNotifs() {
+    call('notifications', {}).then(function (r) {
+      if (state.tab !== 'notifs') return;
+      if (!r.ok) return failView(r);
+      var seen = +(store('get', NKEY) || 0), tabs = myTabs();
+      var html = pushBanner() + '<h2 class="sec">Notifications (last 30 days)</h2>';
+      html += r.items.length ? '<div class="list">' + r.items.map(function (n, i) {
+        var unread = n.t > seen, can = n.view && tabs.indexOf(n.view) > -1 && n.view !== 'notifs';
+        return '<' + (can ? 'button' : 'div') + ' class="item notif' + (unread ? ' unread' : '') + '"' + (can ? ' data-go="' + esc(n.view) + '"' : '') + '>' +
+          '<div class="person"><div class="nic">' + notifIcon(n) + '</div><div class="item-main">' +
+          '<div class="item-title">' + esc(n.title) + '</div>' +
+          (n.body ? '<div class="item-sub">' + esc(n.body) + '</div>' : '') +
+          '<div class="load">' + esc(whenText(n.t)) + (unread ? ' · <b style="color:var(--red)">New</b>' : '') + '</div>' +
+          '</div></div></' + (can ? 'button' : 'div') + '>';
+      }).join('') + '</div>'
+        : '<div class="empty">No notifications in the last 30 days.</div>';
+      $('view').innerHTML = html;
+      wirePushBanner();
+      Array.prototype.forEach.call(document.querySelectorAll('[data-go]'), function (b) {
+        b.onclick = function () { go(b.getAttribute('data-go')); };
+      });
+      if (r.items.length) store('set', NKEY, String(Math.max(seen, r.items[0].t)));
+      setNotifDot(0);
+    });
   }
 
   /* ============ INSPECTOR: GEOTAGGED PHOTOS ============
@@ -1114,6 +1176,7 @@
         var d = (payload && payload.data) || {};
         toast((d.title ? d.title + ' - ' : '') + (d.body || ''));
         refresh();
+        if (state.tab !== 'notifs') checkNotifs();
       });
       var last = +(store('get', KEY.push) || 0);
       if (Notification.permission === 'granted' && Date.now() - last > 864e5) enablePush(false);
