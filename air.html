@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Send your AIR - Inspection Team</title>
+  <meta name="description" content="Send your Acceptance and Inspection Report to the Inspection Team, Provincial Government of Quirino">
+  <meta name="theme-color" content="#e06a00">
+  <link rel="icon" type="image/png" href="icons/favicon.png?v=2">
+  <link rel="stylesheet" href="app.css?v=30">
+  <style>
+    .air .front-top { margin-bottom: 18px; }
+    .air .seal { width: 96px; height: 96px; }
+    .air h1 { font-size: 22px; margin: 14px 0 4px; color: #fff; }
+    .air .card { width: 100%; max-width: 440px; color: var(--ink); margin-bottom: 14px; }
+    .air .step { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--orange, #e06a00); margin: 0 0 8px; }
+    .air input[type=email] { width: 100%; }
+    .air .reqs .item { border: 2px solid #edf0ee; margin-bottom: 8px; }
+    .air .reqs .item.sel { border-color: var(--green); background: #fff7ee; }
+    .air .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .air .files { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 4px; }
+    .air .f { position: relative; aspect-ratio: 3 / 4; border-radius: 10px; overflow: hidden; background: #f1f1f1; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 12px; padding: 4px; }
+    .air .f img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .air .f button { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 16px; line-height: 1; }
+    .air .f .st { position: absolute; left: 4px; right: 4px; bottom: 4px; background: rgba(255,255,255,.92); border-radius: 6px; font-weight: 700; padding: 2px; }
+    .air .done { text-align: center; }
+    .air .done .big { font-size: 52px; }
+  </style>
+</head>
+<body>
+  <section class="front air">
+    <div class="front-top">
+      <img class="seal" src="icons/seal-320.webp" alt="Official Seal of the Province of Quirino">
+      <div class="gov">Provincial Government of Quirino · The Inspection Team</div>
+      <h1>Send your Acceptance and Inspection Report (AIR)</h1>
+    </div>
+
+    <div class="card" id="cEmail">
+      <div class="step">Step 1 · Find your request</div>
+      <label for="email">Email you used on the request form</label>
+      <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="name@gmail.com">
+      <p class="hint">No sign-in needed. We only use this to find your request for inspection.</p>
+      <button class="btn primary" id="find">Find my request</button>
+      <p class="hint" id="findMsg" style="margin-bottom:0"></p>
+    </div>
+
+    <div class="card hidden" id="cReq">
+      <div class="step">Step 2 · Choose the request</div>
+      <div class="reqs" id="reqs"></div>
+    </div>
+
+    <div class="card hidden" id="cFiles">
+      <div class="step">Step 3 · Add your AIR</div>
+      <p class="hint" style="margin-top:0">Take one clear photo per page (the whole page, readable), or choose a PDF file.</p>
+      <div class="two">
+        <button class="btn ghost" id="takeBtn">📷 Take photo</button>
+        <button class="btn ghost" id="pickBtn">📁 Choose file</button>
+      </div>
+      <input type="file" id="takeIn" accept="image/*" capture="environment" class="hidden">
+      <input type="file" id="pickIn" accept="image/*,application/pdf" multiple class="hidden">
+      <div class="files" id="files"></div>
+      <button class="btn primary" id="send" disabled style="margin-top:12px">Send to the Inspection Team</button>
+      <p class="hint" id="sendMsg" style="margin-bottom:0"></p>
+    </div>
+
+    <div class="card hidden done" id="cDone">
+      <div class="big">✅</div>
+      <h2 style="margin:6px 0">Received. Thank you!</h2>
+      <p class="hint" id="doneMsg"></p>
+      <button class="btn ghost" id="more">Send another page or file</button>
+    </div>
+  </section>
+  <script src="config.js?v=30"></script>
+  <script src="air.js?v=30"></script>
+</body>
+</html>

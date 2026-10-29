@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '29';
+  var APP_VERSION = '30';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -416,6 +416,9 @@
       wirePushBanner();
       var jobs = {};
       r.upcoming.concat(r.recent).forEach(function (j) { jobs[j.row] = j; });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-air]'), function (b) {
+        b.onclick = function () { airSheet(jobs[+b.getAttribute('data-air')]); };
+      });
       Array.prototype.forEach.call(document.querySelectorAll('[data-photo]'), function (b) {
         b.onclick = function () { photoSheet(jobs[+b.getAttribute('data-photo')]); };
       });
@@ -504,12 +507,12 @@
       (j.rep ? '<div class="item-sub">👤 ' + esc(j.rep) + (j.repContact ? ' · <a class="inline" href="tel:' + esc(String(j.repContact).replace(/[^\d+]/g, '')) + '">' + esc(j.repContact) + '</a>' : '') + '</div>' : '') +
       '<div class="meta">' + (filed ? '' : respChip(j)) + '<span class="chip gold">' + esc(j.ref) + '</span>' + (j.amountText ? '<span class="chip">' + esc(j.amountText) + '</span>' : '') + fchip + '</div>' +
       '</div></div>';
-    var body = '';
+    var body = j.air ? '<div class="actions"><button class="btn ghost" data-air="' + j.row + '">📄 View AIR (' + j.air + ' file' + (j.air === 1 ? '' : 's') + ')</button></div>' : '';
     if (declined) {
       body = '';
     } else if (!accepted && !filed) {
       /* Step 1: accept or not */
-      body = '<div class="actions"><button class="btn ghost" data-cant="' + j.row + '" style="color:var(--red);border-color:var(--red)">I can\'t right now</button>' +
+      body += '<div class="actions"><button class="btn ghost" data-cant="' + j.row + '" style="color:var(--red);border-color:var(--red)">I can\'t right now</button>' +
         '<button class="btn primary" data-confirm="' + j.row + '">✔ I accept this assignment</button></div>';
     } else {
       /* Step 2: report, then photos */
@@ -1032,6 +1035,67 @@
     draw();
   }
 
+  /* ============ ACCEPTANCE AND INSPECTION REPORT (AIR) ============
+     Sent by the requestor from the no-sign-in AIR page; opened here through the engine,
+     so nobody needs access to the Drive folder. */
+  var AIR_PAGE = 'https://bryanrramones.github.io/inspection-hub/air.html';
+  var airCache = {};
+  function copyText(t) {
+    var done = function () { toast('Link copied. Paste it in your message to the requestor.'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, function () { prompt('Copy this link:', t); });
+    else prompt('Copy this link:', t);
+  }
+  function airSheet(q, back) {
+    openSheet('<h3>Acceptance and Inspection Report</h3><p class="hint" style="margin-top:-8px">' + esc(q.office) + ' · ' + esc(q.dateText || '') + '</p><div class="empty">Loading…</div>');
+    call('airList', { row: q.row }).then(function (r) {
+      if (!r.ok) { closeSheet(); return toast(r.error, true); }
+      var h = '<h3>Acceptance and Inspection Report</h3><p class="hint" style="margin-top:-8px">' + esc(q.office) + ' · ' + esc(q.dateText || '') + '</p>';
+      h += r.files.length ? '<div class="list">' + r.files.map(function (f, i) {
+        var pdf = f.mime === 'application/pdf';
+        return '<button class="item" data-airf="' + i + '"><div class="person"><div class="nic">' + (pdf ? '📄' : '🖼️') + '</div><div class="item-main">' +
+          '<div class="item-title">' + esc(f.name) + '</div><div class="load">' + (pdf ? 'PDF' : 'Photo') + ' · ' + Math.max(1, Math.round(f.size / 1024)) + ' KB · sent ' + esc(whenText(f.at)) + '</div></div></div></button>';
+      }).join('') + '</div>' : '<div class="empty">No AIR has been sent for this request yet.</div>';
+      if (back) h += '<button class="btn link" id="airBack">← Back to the request</button>';
+      var s = openSheet(h);
+      if ($('airBack')) $('airBack').onclick = back;
+      Array.prototype.forEach.call(s.querySelectorAll('[data-airf]'), function (b) {
+        b.onclick = function () { airOpen(q, r.files[+b.getAttribute('data-airf')]); };
+      });
+    });
+  }
+  function airOpen(q, f) {
+    var show = function (d) {
+      var bin = atob(d.data), arr = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      var url = URL.createObjectURL(new Blob([arr], { type: d.mime }));
+      if (d.mime === 'application/pdf') {
+        var a = document.createElement('a'); a.href = url; a.download = d.name; a.target = '_blank'; a.rel = 'noopener';
+        document.body.appendChild(a); a.click(); a.remove();
+        toast('Opening the PDF…');
+      } else viewDoc(url);
+    };
+    var key = q.row + ':' + f.id;
+    if (airCache[key]) return show(airCache[key]);
+    busy(true);
+    call('airFile', { row: q.row, id: f.id }).then(function (d) {
+      busy(false);
+      if (!d.ok) return toast(d.error, true);
+      airCache[key] = d; show(d);
+    });
+  }
+  /* Document photo viewer: tap the picture to zoom in and scroll around; × closes. */
+  function viewDoc(url) {
+    var v = document.createElement('div');
+    v.className = 'viewer docv';
+    var img = document.createElement('img'); img.src = url; img.alt = '';
+    var x = document.createElement('button'); x.className = 'cam-x'; x.textContent = '×'; x.setAttribute('aria-label', 'Close');
+    var tip = document.createElement('div'); tip.className = 'docv-tip'; tip.textContent = 'Tap to zoom';
+    v.appendChild(img); v.appendChild(x); v.appendChild(tip);
+    img.onclick = function () { v.classList.toggle('zoom'); tip.textContent = v.classList.contains('zoom') ? 'Tap to fit' : 'Tap to zoom'; };
+    x.onclick = function () { v.remove(); };
+    document.body.appendChild(v);
+  }
+
   /* Full-size view of a photo (the stamp sits at the bottom, so show the whole picture). */
   function viewPhoto(url) {
     var v = document.createElement('div');
@@ -1184,6 +1248,7 @@
     if (q.late) chips += '<span class="chip red">Schedule already passed</span>';
     if (q.warnings && q.warnings.length) chips += '<span class="chip amber">Outside working hours/days</span>';
     if (q.amountText) chips += '<span class="chip">' + esc(q.amountText) + '</span>';
+    chips += q.air ? '<span class="chip blue">📎 AIR attached</span>' : '<span class="chip red">No AIR yet</span>';
     return '<button class="item" data-row="' + q.row + '"><div class="item-top">' + dateBox(q.start) +
       '<div class="item-main"><div class="item-title">' + esc(q.office) + '</div>' +
       '<div class="item-sub">🕘 ' + esc(q.timeText || '-') + ' · 📍 ' + esc(q.place || '-') + '</div>' +
@@ -1312,6 +1377,8 @@
           '<dt>Email</dt><dd>' + esc(q.reqEmail) + '</dd>' +
           (q.rep ? '<dt>On-site rep.</dt><dd>' + esc(q.rep) + (q.repContact ? ' · ' + esc(q.repContact) : '') + '</dd>' : '') +
           '<dt>Sheet row</dt><dd>' + q.row + '</dd></dl>';
+        h += q.air ? '<div class="note green"><b>📎 Acceptance and Inspection Report attached</b>' + q.air + ' file' + (q.air === 1 ? '' : 's') + ' sent by the requestor.<button class="btn ghost" id="airBtn" style="margin-top:8px">📄 View AIR</button></div>'
+          : '<div class="note red"><b>No Acceptance and Inspection Report (AIR) yet</b>The requestor can send it here, no sign-in needed:<br><span style="word-break:break-all">' + esc(AIR_PAGE) + '</span><button class="btn ghost" id="airCopy" style="margin-top:8px">Copy link to send to the requestor</button></div>';
         if (q.warnings && q.warnings.length) h += '<div class="note amber"><b>Outside normal working hours/days</b>' + q.warnings.map(esc).join('<br>') + '<br>An approved request letter from the Local Chief Executive is needed.</div>';
         if (reassign && q.response === 'Declined') h += '<div class="note red"><b>' + esc(title(q.inspectorName)) + ' can\'t do this inspection.</b>' + esc(q.respWhy || 'No reason given') + '<br>Choose a new inspector below, or cancel the inspection.</div>';
         else if (reassign) h += '<div class="note green"><b>Approved · ' + esc(q.ref || '') + '</b>Assigned to ' + esc(title(q.inspectorName)) + (q.response === 'Confirmed' ? ' (accepted)' : ' (not yet accepted)') + '. You can change the inspector or cancel the inspection.</div>';
@@ -1348,6 +1415,8 @@
         if ($('cancelBtn')) $('cancelBtn').onclick = function () { cancelForm(q); };
         if ($('denyBtn')) $('denyBtn').onclick = function () { denyForm(q); };
         if ($('holdBtn')) $('holdBtn').onclick = function () { holdForm(q); };
+        if ($('airBtn')) $('airBtn').onclick = function () { airSheet(q, function () { openRequest(row, reassign); }); };
+        if ($('airCopy')) $('airCopy').onclick = function () { copyText(AIR_PAGE); };
       }
       draw();
     });

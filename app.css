@@ -236,3 +236,7 @@ a.chip { text-decoration: none; }
 .searchbox input { flex: 1; border: 0 !important; box-shadow: none !important; padding: 11px 0; background: transparent; font-size: 15px; min-width: 0; }
 .searchbox input::-webkit-search-cancel-button { display: none; }
 .searchbox button { border: 0; background: #eee; color: #555; width: 26px; height: 26px; border-radius: 50%; font-size: 17px; line-height: 1; }
+.viewer.docv { overflow: auto; align-items: center; }
+.viewer.docv.zoom { display: block; }
+.viewer.docv.zoom img { max-width: none; max-height: none; width: 220%; }
+.docv-tip { position: fixed; bottom: calc(env(safe-area-inset-bottom) + 16px); left: 50%; transform: translateX(-50%); background: rgba(255,255,255,.9); color: #222; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 16px; pointer-events: none; }
