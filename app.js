@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '24';
+  var APP_VERSION = '25';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -882,16 +882,16 @@
       if (d.result) {
         h += '<div class="field"><label>' + (d.result === 'Rejected' ? 'Details' + (d.reasons.indexOf('Other') > -1 ? ' (required)' : ' (optional)') : 'Remarks (optional)') + '</label>' +
           '<textarea id="dNote" rows="3" placeholder="' + (d.result === 'Rejected' ? 'e.g. 20 of 50 boxes delivered; wrong brand of cement' : 'e.g. Delivered complete and in good condition') + '">' + esc(d.note) + '</textarea></div>' +
-          '<label class="lbl">Signed Acceptance &amp; Inspection Report</label>' +
+          (d.result !== 'Approved' ? '' : '<label class="lbl">Signed Acceptance &amp; Inspection Report</label>' +
           (d.url ? '<div class="report-prev"><img src="' + d.url + '" alt=""><button class="btn link" id="dRetake">Retake</button></div>'
             : '<button class="btn ghost" id="dCam">📷 Take photo of the signed report</button>' +
-              '<p class="hint" style="text-align:center;margin-top:6px"><a class="inline" href="#" id="dGal">or choose from gallery</a></p>') +
+              '<p class="hint" style="text-align:center;margin-top:6px"><a class="inline" href="#" id="dGal">or choose from gallery</a></p>')) +
           '<div style="height:10px"></div><button class="btn primary" id="dSend">Submit</button>';
       }
       h += '<p class="hint" style="text-align:center;margin-top:12px"><a class="inline" target="_blank" rel="noopener" href="' + esc(j.findingsLink) + '">Open the full findings form instead</a></p>';
       openSheet(h); $('sheet').scrollTop = y;
       Array.prototype.forEach.call(document.querySelectorAll('[data-res]'), function (b) {
-        b.onclick = function () { keepNote(); d.result = b.getAttribute('data-res'); draw(); };
+        b.onclick = function () { keepNote(); d.result = b.getAttribute('data-res'); if (d.result !== 'Approved') { d.report = null; d.url = ''; } draw(); };
       });
       Array.prototype.forEach.call(document.querySelectorAll('[data-why]'), function (b) {
         b.onclick = function () { keepNote(); var x = b.getAttribute('data-why'), i = d.reasons.indexOf(x); if (i > -1) d.reasons.splice(i, 1); else d.reasons.push(x); draw(); };
@@ -925,7 +925,8 @@
       var note = d.note.trim();
       if (d.result === 'Rejected' && !d.reasons.length && !note) return toast('Please choose or type the reason.', true);
       if (d.reasons.indexOf('Other') > -1 && !note) return toast('Please type the details for "Other".', true);
-      var go = d.report ? Promise.resolve(true) : confirmBox('Submit without the report?',
+      if (d.result !== 'Approved') { d.report = null; }
+      var go = (d.report || d.result !== 'Approved') ? Promise.resolve(true) : confirmBox('Submit without the report?',
         'No photo of the signed Acceptance &amp; Inspection Report was added. The Control Panel will show <b>' + (d.result === 'Approved' ? 'Approved - NO REPORT' : 'no report') + '</b> until it is added.', 'Submit anyway', 'Add the photo');
       go.then(function (y) {
         if (!y) return;
