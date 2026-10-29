@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '31';
+  var APP_VERSION = '32';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -115,7 +115,7 @@
   /* ---------- opening splash (Provincial Capitol + an inspection tip) ---------- */
   var TIPS = [
     { t: 'Check that the Acceptance and Inspection Report (AIR) is attached before approving a request.', lead: true },
-    { t: 'No AIR yet? Open the request and tap "Copy link" to send the upload page to the requestor.', lead: true },
+    { t: 'No AIR attached? Open the request and tap "Copy link" to send the upload page to the requestor.', lead: true },
     { t: 'Search for an inspector by name, office, team, goods or status when assigning.', lead: true },
     { t: 'Requests outside working hours or on weekends need an approved letter from the Local Chief Executive.', lead: true },
     { t: 'Put a request on hold when its documents are not ready - the requestor gets an email right away.', lead: true },
@@ -1282,7 +1282,7 @@
     if (q.late) chips += '<span class="chip red">Schedule already passed</span>';
     if (q.warnings && q.warnings.length) chips += '<span class="chip amber">Outside working hours/days</span>';
     if (q.amountText) chips += '<span class="chip">' + esc(q.amountText) + '</span>';
-    chips += q.air ? '<span class="chip blue">📎 AIR attached</span>' : '<span class="chip red">No AIR yet</span>';
+    chips += q.air ? '<span class="chip blue">📎 AIR Attached</span>' : '<span class="chip red">No AIR Attached</span>';
     return '<button class="item" data-row="' + q.row + '"><div class="item-top">' + dateBox(q.start) +
       '<div class="item-main"><div class="item-title">' + esc(q.office) + '</div>' +
       '<div class="item-sub">🕘 ' + esc(q.timeText || '-') + ' · 📍 ' + esc(q.place || '-') + '</div>' +
@@ -1412,7 +1412,7 @@
           (q.rep ? '<dt>On-site rep.</dt><dd>' + esc(q.rep) + (q.repContact ? ' · ' + esc(q.repContact) : '') + '</dd>' : '') +
           '<dt>Sheet row</dt><dd>' + q.row + '</dd></dl>';
         h += q.air ? '<div class="note green"><b>📎 Acceptance and Inspection Report attached</b>' + q.air + ' file' + (q.air === 1 ? '' : 's') + ' sent by the requestor.<button class="btn ghost" id="airBtn" style="margin-top:8px">📄 View AIR</button></div>'
-          : '<div class="note red"><b>No Acceptance and Inspection Report (AIR) yet</b>The requestor can send it here, no sign-in needed:<br><span style="word-break:break-all">' + esc(AIR_PAGE) + '</span><button class="btn ghost" id="airCopy" style="margin-top:8px">Copy link to send to the requestor</button></div>';
+          : '<div class="note red"><b>No AIR Attached</b>No Acceptance and Inspection Report has been sent yet. The requestor can send it here, no sign-in needed:<br><span style="word-break:break-all">' + esc(AIR_PAGE) + '</span><button class="btn ghost" id="airCopy" style="margin-top:8px">Copy link to send to the requestor</button></div>';
         if (q.warnings && q.warnings.length) h += '<div class="note amber"><b>Outside normal working hours/days</b>' + q.warnings.map(esc).join('<br>') + '<br>An approved request letter from the Local Chief Executive is needed.</div>';
         if (reassign && q.response === 'Declined') h += '<div class="note red"><b>' + esc(title(q.inspectorName)) + ' can\'t do this inspection.</b>' + esc(q.respWhy || 'No reason given') + '<br>Choose a new inspector below, or cancel the inspection.</div>';
         else if (reassign) h += '<div class="note green"><b>Approved · ' + esc(q.ref || '') + '</b>Assigned to ' + esc(title(q.inspectorName)) + (q.response === 'Confirmed' ? ' (accepted)' : ' (not yet accepted)') + '. You can change the inspector or cancel the inspection.</div>';
