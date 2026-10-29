@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '27';
+  var APP_VERSION = '28';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -148,8 +148,9 @@
 
   function signOut(silent) {
     if (!silent && state.token) call('logout', {});
-    state.token = null; state.me = null;
+    state.token = null; state.me = null; mem = {}; sugg = {}; inflight = {};
     store('del', KEY.token); store('del', KEY.me); store('del', KEY.push);
+    Object.keys(VIEW_ACTION).forEach(function (t) { store('del', 'hub.v.' + VIEW_ACTION[t]); });
     closeSheet(); showFront();
   }
 
@@ -182,6 +183,7 @@
     homeBar();
     setTimeout(uploadQueue, 1500);
     checkNotifs();
+    lastPrefetch = Date.now(); setTimeout(prefetch, 1200);
     if (isInstalled() && !store('get', KEY.installed)) { store('set', KEY.installed, '1'); toast('Inspection Hub is installed on this phone ✓'); }
     // refresh who I am in the background (roles may have changed)
     call('me', {}).then(function (r) {
@@ -199,7 +201,92 @@
     window.scrollTo(0, 0);
     TABS[tab].render();
   }
-  function refresh() { if (state.tab) TABS[state.tab].render(); }
+  /* ---------- fast tabs ----------
+     Each tab shows what was last saved on this phone right away, then quietly checks
+     the engine and redraws only if something changed. After you do something
+     (approve, accept, file...), saved screens are dimmed until fresh data arrives. */
+  var VIEW_ACTION = { requests: 'requests', team: 'team', schedule: 'mySchedule', status: 'myStatus', notifs: 'notifications' };
+  var mem = {}, inflight = {}, dirtyAt = 0, sugg = {};
+  function savedOf(a) {
+    if (mem[a]) return mem[a];
+    try { var c = JSON.parse(store('get', 'hub.v.' + a) || 'null'); if (c && state.me && c.email === state.me.email) return (mem[a] = c); } catch (e) { }
+    return null;
+  }
+  function saveView(a, r) {
+    var c = { at: Date.now(), email: state.me ? state.me.email : '', r: r };
+    mem[a] = c;
+    try { store('set', 'hub.v.' + a, JSON.stringify(c)); } catch (e) { }
+  }
+  function fetchFresh(a) {
+    var f = inflight[a];
+    if (f && f.at >= dirtyAt) return f.p;
+    var at = Date.now();
+    var p = call(a, {}).then(function (r) {
+      if (inflight[a] && inflight[a].p === p) delete inflight[a];
+      if (r && r.ok && at >= dirtyAt) saveView(a, r);
+      if (r && r.ok && a === 'requests') prefetchSuggest(r.pending.concat(r.needs || []).map(function (q) { return q.row; }));
+      return r;
+    });
+    inflight[a] = { at: at, p: p };
+    return p;
+  }
+  function updating(on) {
+    var b = $('updbar');
+    if (!b) { b = document.createElement('div'); b.id = 'updbar'; b.className = 'updbar hidden'; document.body.appendChild(b); }
+    b.classList.toggle('hidden', !on);
+    if (!on) $('view').classList.remove('stale');
+  }
+  function load(a, tab, draw) {
+    var c = savedOf(a), sig = null;
+    if (c) {
+      draw(c.r, true);
+      sig = JSON.stringify(c.r);
+      if (c.at < dirtyAt) $('view').classList.add('stale');
+    }
+    updating(true);
+    fetchFresh(a).then(function (r) {
+      if (state.tab !== tab) return;
+      updating(false);
+      if (!r.ok) {
+        if (!c) return draw(r);
+        if (r.offline) {
+          var v = $('view');
+          if (!v.querySelector('.offline-note')) v.insertAdjacentHTML('afterbegin', '<div class="note amber offline-note" style="margin-top:0"><b>No internet - showing what was saved ' + esc(whenText(c.at)) + '.</b>It will update when you are back online.</div>');
+        } else toast(r.error || 'Could not update.', true);
+        return;
+      }
+      if (JSON.stringify(r) === sig) return;
+      var y = window.scrollY;
+      draw(r, false);
+      window.scrollTo(0, y);
+    });
+  }
+  function prefetch() {
+    if (!state.me) return;
+    var list = myTabs().filter(function (t) { return t !== state.tab; }).map(function (t) { return VIEW_ACTION[t]; });
+    (function next() { var a = list.shift(); if (a) fetchFresh(a).then(next); })();
+  }
+  function prefetchSuggest(rows) {
+    rows.slice(0, 8).forEach(function (row, i) {
+      var s0 = sugg[row];
+      if (s0 && s0.at >= dirtyAt && Date.now() - s0.at < 4 * 60e3) return;
+      setTimeout(function () {
+        var at = Date.now();
+        call('suggest', { row: row }).then(function (r) { if (r && r.ok && at >= dirtyAt) sugg[row] = { at: at, r: r }; });
+      }, i * 400);
+    });
+  }
+  var lastPrefetch = 0;
+  function softRefresh() {
+    if (!state.tab) return;
+    TABS[state.tab].render();
+    if (Date.now() - lastPrefetch > 60e3) { lastPrefetch = Date.now(); setTimeout(prefetch, 2500); }
+  }
+  function refresh() {
+    dirtyAt = Date.now(); sugg = {};
+    if (state.tab) TABS[state.tab].render();
+    setTimeout(prefetch, 3000);
+  }
   function failView(r) {
     $('view').innerHTML = '<div class="empty">' + esc(r.error || 'Something went wrong.') + '<br><br><button class="btn ghost" id="retry" style="max-width:200px;margin:0 auto">Try again</button></div>';
     $('retry').onclick = refresh;
@@ -306,7 +393,7 @@
 
   /* ============ INSPECTOR: SCHEDULE ============ */
   function renderSchedule() {
-    call('mySchedule', {}).then(function (r) {
+    load('mySchedule', 'schedule', function (r, cached) {
       if (state.tab !== 'schedule') return;
       var offlineNote = '';
       if (r.ok) store('set', 'hub.sched', JSON.stringify({ at: Date.now(), email: state.me.email, upcoming: r.upcoming, recent: r.recent }));
@@ -466,14 +553,14 @@
     if (dot) { dot.textContent = n > 99 ? '99+' : n; dot.classList.toggle('hidden', !n); }
   }
   function checkNotifs() {
-    call('notifications', {}).then(function (r) {
+    fetchFresh('notifications').then(function (r) {
       if (!r.ok) return;
       var seen = +(store('get', NKEY) || 0);
       setNotifDot(r.items.filter(function (n) { return n.t > seen; }).length);
     });
   }
   function renderNotifs() {
-    call('notifications', {}).then(function (r) {
+    load('notifications', 'notifs', function (r, cached) {
       if (state.tab !== 'notifs') return;
       if (!r.ok) return failView(r);
       var seen = +(store('get', NKEY) || 0), tabs = myTabs();
@@ -958,7 +1045,7 @@
 
   /* ============ INSPECTOR: MY STATUS ============ */
   function renderStatus() {
-    call('myStatus', {}).then(function (r) {
+    load('myStatus', 'status', function (r, cached) {
       if (state.tab !== 'status') return;
       if (!r.ok) return failView(r);
       $('view').innerHTML = statusPage(r.entries, null);
@@ -1044,7 +1131,7 @@
 
   /* ============ LEADER: REQUESTS ============ */
   function renderRequests() {
-    call('requests', {}).then(function (r) {
+    load('requests', 'requests', function (r, cached) {
       if (state.tab !== 'requests') return;
       if (!r.ok) return failView(r);
       var dot = $('dot-requests');
@@ -1105,8 +1192,10 @@
   }
 
   function openRequest(row, reassign) {
-    openSheet('<div class="empty">Finding available inspectors…</div>');
-    call('suggest', { row: row }).then(function (r) {
+    var s0 = sugg[row];
+    var got = (s0 && s0.at >= dirtyAt && Date.now() - s0.at < 4 * 60e3) ? Promise.resolve(s0.r) : null;
+    if (!got) openSheet('<div class="empty">Finding available inspectors…</div>');
+    (got || call('suggest', { row: row })).then(function (r) {
       if (!r.ok) { closeSheet(); return toast(r.error, true); }
       var q = r.request, sel = null, showOthers = !r.match.length;
       function personRow(p, i, group) {
@@ -1354,7 +1443,7 @@
       Array.prototype.forEach.call(document.querySelectorAll('[data-f]'), function (b) { b.onclick = function () { state.teamFilter = b.getAttribute('data-f'); draw(d); }; });
       Array.prototype.forEach.call(document.querySelectorAll('[data-p]'), function (b) { b.onclick = function () { personSheet(d.people[+b.getAttribute('data-p')]); }; });
     };
-    call('team', {}).then(function (r) {
+    load('team', 'team', function (r, cached) {
       if (state.tab !== 'team') return;
       if (!r.ok) return failView(r);
       state.team = r; draw(r);
@@ -1417,7 +1506,7 @@
     var t = location.hash.replace('#', '');
     if (state.me && TABS[t] && t !== state.tab && myTabs().indexOf(t) > -1) go(t);
   });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden && state.me) refresh(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && state.me) softRefresh(); });
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', function (e) {
       if (e.data && e.data.view && state.me && myTabs().indexOf(e.data.view) > -1) go(e.data.view);
