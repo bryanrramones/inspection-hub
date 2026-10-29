@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '28';
+  var APP_VERSION = '29';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -1191,18 +1191,113 @@
       '<div class="meta">' + chips + '</div></div></div></button>';
   }
 
+  /* ---------- smart inspector search ----------
+     Every word typed must match something: part of the name (small typos forgiven),
+     the office, the team number or the kind of goods, or the status at that schedule. */
+  var HUB_GOODS_APP = { '1': 'Office supplies, consumables, perishables', '2': 'Construction materials', '3': 'Vehicles, heavy equipment, machinery', '4': 'IT and communication', '5': 'Drugs, medicines, medical and dental', '6': 'Veterinary, agricultural, aquatic, livestock' };
+  var GOODS_WORDS = {
+    '1': 'office supplies supply consumables perishables paper bond ink toner ballpen pen food meals snacks rice groceries furniture janitorial',
+    '2': 'construction materials cement rebar rebars steel gravel sand lumber wood plywood hollow blocks pipes paint nails hardware roofing',
+    '3': 'vehicles vehicle car cars truck trucks ambulance motorcycle heavy equipment machinery machine backhoe tires tyres engine',
+    '4': 'it communication computer computers laptop laptops printer printers desktop tablet phone cctv network software projector',
+    '5': 'drugs drug medicines medicine medical dental hospital laboratory lab supplies vaccines syringes',
+    '6': 'veterinary agricultural agriculture aquatic livestock seeds fertilizer feeds feed fish fingerlings animals vaccine piglets chicks'
+  };
+  function lev1(a, b) { // true when a and b differ by at most one letter (added, missing or changed)
+    if (a === b) return true;
+    var la = a.length, lb = b.length;
+    if (Math.abs(la - lb) > 1) return false;
+    var i = 0, j = 0, d = 0;
+    while (i < la && j < lb) {
+      if (a[i] === b[j]) { i++; j++; continue; }
+      if (++d > 1) return false;
+      if (la > lb) i++; else if (lb > la) j++; else { i++; j++; }
+    }
+    return d + (la - i) + (lb - j) <= 1;
+  }
+  function smartScore(p, text, goods, unavailable) {
+    var words = String(text).toLowerCase().replace(/[^a-z0-9ñ ]/g, ' ').split(/\s+/).filter(Boolean)
+      .filter(function (w) { return ['team', 'the', 'of', 'and', 'from'].indexOf(w) < 0; });
+    if (!words.length) return 1;
+    var nameWords = String(p.name || '').toLowerCase().replace(/[^a-z0-9ñ ]/g, ' ').split(/\s+/).filter(Boolean);
+    var office = String(p.office || '').toLowerCase();
+    var teams = p.teams || [];
+    var goodsText = teams.map(function (t) { return (goods[t] || '').toLowerCase() + ' ' + (GOODS_WORDS[t] || ''); }).join(' ');
+    var reason = String(p.reason || '').toLowerCase();
+    var total = 0;
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i], sc = 0;
+      nameWords.forEach(function (n) {
+        if (n.indexOf(w) === 0) sc = Math.max(sc, 10);
+        else if (n.indexOf(w) > 0 && w.length > 1) sc = Math.max(sc, 6);
+        else if (w.length >= 4 && (lev1(w, n) || lev1(w, n.slice(0, w.length)))) sc = Math.max(sc, 4);
+      });
+      if (office.indexOf(w) > -1) sc = Math.max(sc, office === w ? 9 : 7);
+      if (/^\d$/.test(w) && teams.indexOf(w) > -1) sc = Math.max(sc, 8);
+      if (w.length >= 3 && goodsText.split(/[^a-z]+/).some(function (g) { return g.indexOf(w) === 0; })) sc = Math.max(sc, 5);
+      if (/^(avail|available|free|open|libre|pwede)/.test(w) && !unavailable) sc = Math.max(sc, 3);
+      if (/^(leave|vacation|sick|vl|sl)/.test(w) && /leave/.test(reason)) sc = Math.max(sc, 3);
+      if (/^(ob|official|travel|seminar|training)/.test(w) && /official|business/.test(reason)) sc = Math.max(sc, 3);
+      if (/^(book|busy|overlap|clash)/.test(w) && (p.clash || /book/.test(reason))) sc = Math.max(sc, 3);
+      if (/^(declin|cant|unavailable|not)/.test(w) && unavailable) sc = Math.max(sc, 3);
+      if (!sc) return 0;
+      total += sc;
+    }
+    return total + (p.sameTeam ? 1 : 0);
+  }
+
   function openRequest(row, reassign) {
     var s0 = sugg[row];
     var got = (s0 && s0.at >= dirtyAt && Date.now() - s0.at < 4 * 60e3) ? Promise.resolve(s0.r) : null;
     if (!got) openSheet('<div class="empty">Finding available inspectors…</div>');
     (got || call('suggest', { row: row })).then(function (r) {
       if (!r.ok) { closeSheet(); return toast(r.error, true); }
-      var q = r.request, sel = null, showOthers = !r.match.length;
-      function personRow(p, i, group) {
-        return '<button class="item pick" data-pick="' + group + ':' + i + '"><div class="person"><div class="radio"></div><div class="avatar">' + initials(p.name) + '</div>' +
+      var q = r.request, sel = null, pf = { scope: r.match.length ? 'team' : 'all', least: false, noClash: false, text: '' };
+      function personRow(p, key) {
+        return '<button class="item pick" data-pick="' + key + '"><div class="person"><div class="radio"></div><div class="avatar">' + initials(p.name) + '</div>' +
           '<div class="item-main"><div class="item-title">' + esc(title(p.name)) + '</div>' +
           '<div class="load">' + esc(p.office) + ' · Team ' + esc(p.teams.join(', ')) + ' · ' + p.load + ' inspection' + (p.load === 1 ? '' : 's') + ' in 30 days</div>' +
           (p.clash ? '<div class="clash">⚠ ' + esc(p.clash) + '</div>' : '') + '</div></div></button>';
+      }
+      var goods = r.goods || HUB_GOODS_APP;
+      function unRow(p) {
+        return '<div class="item"><div class="person"><div class="avatar" style="opacity:.55">' + initials(p.name) + '</div><div class="item-main"><div class="item-title">' + esc(title(p.name)) +
+          (p.sameTeam ? ' <span class="chip green">this team</span>' : '') + '</div><div class="load">' + esc(p.office || '') + (p.teams && p.teams.length ? ' · Team ' + esc(p.teams.join(', ')) : '') + '</div><div class="load" style="color:var(--red)">Not available: ' + esc(p.reason) + '</div></div></div></div>';
+      }
+      function pickList() {
+        var all = r.match.map(function (p, i) { return { p: p, k: 'm:' + i }; }).concat(r.others.map(function (p, i) { return { p: p, k: 'o:' + i }; }));
+        var text = pf.text.trim(), h = '';
+        if (text) {
+          var hits = all.map(function (x) { x.sc = smartScore(x.p, text, goods, false); return x; }).filter(function (x) { return x.sc > 0; });
+          var un = r.unavailable.map(function (p) { return { p: p, sc: smartScore(p, text, goods, true) }; }).filter(function (x) { return x.sc > 0; });
+          if (pf.noClash) hits = hits.filter(function (x) { return !x.p.clash; });
+          hits.sort(function (a, b) { return pf.least ? (a.p.load - b.p.load || b.sc - a.sc) : (b.sc - a.sc || a.p.load - b.p.load); });
+          un.sort(function (a, b) { return b.sc - a.sc; });
+          h += '<p class="hint" style="margin:2px 0 8px">Searching all teams · ' + hits.length + ' available' + (un.length ? ', ' + un.length + ' not available' : '') + '</p>';
+          if (hits.length) h += '<div class="list">' + hits.map(function (x) { return personRow(x.p, x.k); }).join('') + '</div>';
+          if (un.length) h += '<div class="list" style="margin-top:8px">' + un.map(function (x) { return unRow(x.p); }).join('') + '</div>';
+          if (!hits.length && !un.length) h += '<div class="empty">No inspector matches "' + esc(text) + '".</div>';
+          return h;
+        }
+        var list = all.filter(function (x) { return (pf.scope === 'all' || x.k.charAt(0) === 'm') && (!pf.noClash || !x.p.clash); });
+        if (pf.least) list.sort(function (a, b) { return a.p.load - b.p.load || (a.p.clash ? 1 : 0) - (b.p.clash ? 1 : 0); });
+        else if (pf.scope === 'all') list.sort(function (a, b) { return (a.k.charAt(0) === 'm' ? 0 : 1) - (b.k.charAt(0) === 'm' ? 0 : 1); });
+        if (!r.match.length && pf.scope === 'team') h += '<div class="note amber"><b>No one from Team ' + esc(q.goodsCode || '?') + ' (' + esc(r.team) + ') is available.</b>Tap "All teams" to see the others.</div>';
+        else if (!r.match.length) h += '<div class="note amber" style="margin-top:0"><b>No one from Team ' + esc(q.goodsCode || '?') + ' is available.</b>Showing available inspectors from the other teams.</div>';
+        if (list.length) h += '<div class="list">' + list.map(function (x) { return personRow(x.p, x.k); }).join('') + '</div>';
+        else if (r.match.length || pf.scope === 'all') h += '<div class="note red"><b>No available inspector' + (pf.noClash ? ' without an overlap' : '') + '.</b>' + (pf.noClash ? 'Turn off "No overlap" to see people who have another inspection around this time.' : 'Everyone is on leave, on official business, unavailable or already booked.') + '</div>';
+        if (r.unavailable.length) {
+          h += '<details style="margin-top:14px"><summary class="hint" style="cursor:pointer">Not available at this schedule (' + r.unavailable.length + ')</summary><div class="list" style="margin-top:8px">' +
+            r.unavailable.map(unRow).join('') + '</div></details>';
+        }
+        return h;
+      }
+      function wirePicks(s) {
+        Array.prototype.forEach.call(s.querySelectorAll('[data-pick]'), function (b) {
+          var k = b.getAttribute('data-pick').split(':'), p = (k[0] === 'm' ? r.match : r.others)[+k[1]];
+          if (sel && sel.email === p.email && sel.name === p.name) b.classList.add('sel');
+          b.onclick = function () { sel = p; var y = s.scrollTop; draw(); $('sheet').scrollTop = y; };
+        });
       }
       function draw() {
         var h = '<h3>' + esc(q.office) + '</h3>' +
@@ -1221,18 +1316,15 @@
         if (reassign && q.response === 'Declined') h += '<div class="note red"><b>' + esc(title(q.inspectorName)) + ' can\'t do this inspection.</b>' + esc(q.respWhy || 'No reason given') + '<br>Choose a new inspector below, or cancel the inspection.</div>';
         else if (reassign) h += '<div class="note green"><b>Approved · ' + esc(q.ref || '') + '</b>Assigned to ' + esc(title(q.inspectorName)) + (q.response === 'Confirmed' ? ' (accepted)' : ' (not yet accepted)') + '. You can change the inspector or cancel the inspection.</div>';
         if (q.start && q.start < Date.now()) h += '<div class="note red"><b>The requested schedule has already passed.</b>Check with the requesting office before approving.</div>';
-        h += '<h2 class="sec">Team ' + esc(q.goodsCode || '?') + ' · ' + esc(r.team) + '</h2>';
-        if (r.match.length) h += '<div class="list">' + r.match.map(function (p, i) { return personRow(p, i, 'm'); }).join('') + '</div>';
-        else h += '<div class="note amber"><b>No one from this team is available.</b>Showing available inspectors from the other teams instead.</div>';
-        if (r.others.length) {
-          if (showOthers) h += '<h2 class="sec">Other teams (available)</h2><div class="list">' + r.others.map(function (p, i) { return personRow(p, i, 'o'); }).join('') + '</div>';
-          else h += '<button class="btn link" id="moreBtn">Show available inspectors from other teams (' + r.others.length + ')</button>';
-        }
-        if (!r.match.length && !r.others.length) h += '<div class="note red"><b>No available inspector at this schedule.</b>Everyone is on leave, on official business, unavailable or already booked.</div>';
-        if (r.unavailable.length) {
-          h += '<details style="margin-top:14px"><summary class="hint" style="cursor:pointer">Not available at this schedule (' + r.unavailable.length + ')</summary><div class="list" style="margin-top:8px">' +
-            r.unavailable.map(function (p) { return '<div class="item"><div class="person"><div class="avatar" style="opacity:.55">' + initials(p.name) + '</div><div class="item-main"><div class="item-title">' + esc(title(p.name)) + (p.sameTeam ? ' <span class="chip green">this team</span>' : '') + '</div><div class="load">' + esc(p.reason) + '</div></div></div></div>'; }).join('') + '</div></details>';
-        }
+        h += '<h2 class="sec">Choose an inspector</h2>' +
+          '<div class="searchbox"><span>🔍</span><input type="search" id="pickQ" autocomplete="off" placeholder="Search name, office, team, goods or status" value="' + esc(pf.text) + '">' +
+          '<button id="pickClear" aria-label="Clear"' + (pf.text ? '' : ' class="hidden"') + '>×</button></div>' +
+          '<div class="filters" id="pickChips">' +
+          '<button data-pf="team" class="' + (pf.scope === 'team' ? 'on' : '') + '">Team ' + esc(q.goodsCode || '?') + ' only</button>' +
+          '<button data-pf="all" class="' + (pf.scope === 'all' ? 'on' : '') + '">All teams</button>' +
+          '<button data-pf="least" class="' + (pf.least ? 'on' : '') + '">Least busy first</button>' +
+          '<button data-pf="noClash" class="' + (pf.noClash ? 'on' : '') + '">No overlap</button></div>' +
+          '<div id="pickList">' + pickList() + '</div>';
         if (reassign) h += '<div style="height:16px"></div><button class="btn primary" id="approveBtn"' + (sel ? '' : ' disabled') + '>Assign new inspector</button>' +
           '<button class="btn ghost" id="cancelBtn" style="color:var(--red);border-color:var(--red);margin-top:10px">Cancel this inspection</button>' +
           '<p class="hint" style="text-align:center">' + (sel ? 'Assigning ' + esc(title(sel.name)) : 'Choose the new inspector') + '</p>';
@@ -1241,12 +1333,17 @@
           '<button class="btn ghost" id="holdBtn" style="margin-top:10px">⏸ Put on hold - documents not ready</button>' +
           '<p class="hint" style="text-align:center">' + (sel ? 'Assigning ' + esc(title(sel.name)) + (sel.clash ? ' · <span style="color:#a15c00">⚠ has another inspection around this time</span>' : '') : 'Choose an inspector to approve') + '</p>';
         var s = openSheet(h);
-        Array.prototype.forEach.call(s.querySelectorAll('[data-pick]'), function (b) {
-          var k = b.getAttribute('data-pick').split(':'), p = (k[0] === 'm' ? r.match : r.others)[+k[1]];
-          if (sel && sel.email === p.email && sel.name === p.name) b.classList.add('sel');
-          b.onclick = function () { sel = p; var y = s.scrollTop; draw(); $('sheet').scrollTop = y; };
+        wirePicks(s);
+        var qi = $('pickQ');
+        qi.oninput = function () { pf.text = qi.value; $('pickClear').classList.toggle('hidden', !qi.value); $('pickList').innerHTML = pickList(); wirePicks(s); };
+        $('pickClear').onclick = function () { qi.value = ''; qi.oninput(); qi.focus(); };
+        Array.prototype.forEach.call(s.querySelectorAll('[data-pf]'), function (b) {
+          b.onclick = function () {
+            var k = b.getAttribute('data-pf');
+            if (k === 'team' || k === 'all') pf.scope = k; else pf[k] = !pf[k];
+            var y = s.scrollTop; draw(); $('sheet').scrollTop = y;
+          };
         });
-        if ($('moreBtn')) $('moreBtn').onclick = function () { showOthers = true; var y = s.scrollTop; draw(); $('sheet').scrollTop = y; };
         $('approveBtn').onclick = function () { if (sel) (reassign ? reassignTo(q, sel) : approve(q, sel, false)); };
         if ($('cancelBtn')) $('cancelBtn').onclick = function () { cancelForm(q); };
         if ($('denyBtn')) $('denyBtn').onclick = function () { denyForm(q); };

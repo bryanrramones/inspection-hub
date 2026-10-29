@@ -231,3 +231,8 @@ a.chip { text-decoration: none; }
 .updbar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 35%; background: #fff; animation: updmove 1.1s ease-in-out infinite; }
 @keyframes updmove { from { left: -35%; } to { left: 100%; } }
 #view.stale { opacity: .55; pointer-events: none; transition: opacity .15s; }
+.searchbox { display: flex; align-items: center; gap: 8px; border: 1.5px solid var(--line); background: #fff; border-radius: 12px; padding: 0 10px; margin-bottom: 10px; }
+.searchbox:focus-within { border-color: var(--green-2); box-shadow: 0 0 0 3px rgba(245,124,0,.2); }
+.searchbox input { flex: 1; border: 0 !important; box-shadow: none !important; padding: 11px 0; background: transparent; font-size: 15px; min-width: 0; }
+.searchbox input::-webkit-search-cancel-button { display: none; }
+.searchbox button { border: 0; background: #eee; color: #555; width: 26px; height: 26px; border-radius: 50%; font-size: 17px; line-height: 1; }
