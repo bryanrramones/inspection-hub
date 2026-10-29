@@ -385,6 +385,13 @@
     };
   }
   function jobCard(j) {
+    if (j.action === 'Cancelled') {
+      return '<div class="item" style="opacity:.75"><div class="item-top">' + dateBox(j.start) +
+        '<div class="item-main"><div class="item-title">' + esc(j.office) + '</div>' +
+        '<div class="item-sub">🕘 ' + esc(j.timeText || '') + ' · 📍 ' + esc(j.place || '') + '</div>' +
+        '<div class="item-sub">✖ ' + esc(j.deniedWhy || 'Cancelled') + '</div>' +
+        '<div class="meta"><span class="chip red">Cancelled - no need to go</span><span class="chip gold">' + esc(j.ref) + '</span></div></div></div></div>';
+    }
     var f = j.findings || '';
     var fchip = !f ? '' : (f === 'Approved' ? '<span class="chip green">Findings filed</span>' :
       (/NO REPORT/.test(f) ? '<span class="chip amber">Report not uploaded</span>' :
@@ -858,9 +865,10 @@
       html += r.pending.length ? '<div class="list">' + r.pending.map(reqCard).join('') + '</div>' : '<div class="empty">All caught up. New requests will appear here, and you will get a notification.</div>';
       if (r.decided.length) {
         html += '<h2 class="sec">Recently decided</h2><div class="list">' + r.decided.slice(0, 12).map(function (d) {
-          return '<div class="item"><div class="item-top">' + dateBox(d.start) + '<div class="item-main"><div class="item-title">' + esc(d.office) + '</div>' +
-            '<div class="item-sub">' + (d.action === 'Approved' ? '👤 ' + esc(title(d.inspectorName)) : '✖ ' + esc(d.deniedWhy || 'Denied')) + '</div>' +
-            '<div class="meta">' + (d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector confirmed</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet confirmed</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + (d.photos && d.photoFolder ? '<a class="chip blue" target="_blank" rel="noopener" href="' + esc(d.photoFolder) + '">📷 ' + d.photos + ' photo' + (d.photos === 1 ? '' : 's') + '</a>' : '') + '</div></div></div></div>';
+          var open = d.action === 'Approved' && (!d.start || d.start > Date.now() - 12 * 36e5);
+          return (open ? '<button class="item" data-row="' + d.row + '" data-re="1">' : '<div class="item">') + '<div class="item-top">' + dateBox(d.start) + '<div class="item-main"><div class="item-title">' + esc(d.office) + '</div>' +
+            '<div class="item-sub">' + (d.action === 'Approved' ? '👤 ' + esc(title(d.inspectorName)) : '✖ ' + esc(d.deniedWhy || d.action)) + '</div>' +
+            '<div class="meta">' + (d.action === 'Cancelled' ? '<span class="chip red">Cancelled</span>' : d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector confirmed</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet confirmed</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + (d.photos && d.photoFolder ? '<a class="chip blue" target="_blank" rel="noopener" href="' + esc(d.photoFolder) + '">📷 ' + d.photos + ' photo' + (d.photos === 1 ? '' : 's') + '</a>' : '') + '</div></div></div>' + (open ? '</button>' : '</div>');
         }).join('') + '</div>';
       }
       $('view').innerHTML = html;
@@ -907,7 +915,8 @@
           (q.rep ? '<dt>On-site rep.</dt><dd>' + esc(q.rep) + (q.repContact ? ' · ' + esc(q.repContact) : '') + '</dd>' : '') +
           '<dt>Sheet row</dt><dd>' + q.row + '</dd></dl>';
         if (q.warnings && q.warnings.length) h += '<div class="note amber"><b>Outside normal working hours/days</b>' + q.warnings.map(esc).join('<br>') + '<br>An approved request letter from the Local Chief Executive is needed.</div>';
-        if (reassign) h += '<div class="note red"><b>' + esc(title(q.inspectorName)) + ' can\'t do this inspection.</b>' + esc(q.respWhy || 'No reason given') + '<br>Choose a new inspector below.</div>';
+        if (reassign && q.response === 'Declined') h += '<div class="note red"><b>' + esc(title(q.inspectorName)) + ' can\'t do this inspection.</b>' + esc(q.respWhy || 'No reason given') + '<br>Choose a new inspector below, or cancel the inspection.</div>';
+        else if (reassign) h += '<div class="note green"><b>Approved · ' + esc(q.ref || '') + '</b>Assigned to ' + esc(title(q.inspectorName)) + (q.response === 'Confirmed' ? ' (confirmed)' : ' (not yet confirmed)') + '. You can change the inspector or cancel the inspection.</div>';
         if (q.start && q.start < Date.now()) h += '<div class="note red"><b>The requested schedule has already passed.</b>Check with the requesting office before approving.</div>';
         h += '<h2 class="sec">Team ' + esc(q.goodsCode || '?') + ' · ' + esc(r.team) + '</h2>';
         if (r.match.length) h += '<div class="list">' + r.match.map(function (p, i) { return personRow(p, i, 'm'); }).join('') + '</div>';
@@ -922,6 +931,7 @@
             r.unavailable.map(function (p) { return '<div class="item"><div class="person"><div class="avatar" style="opacity:.55">' + initials(p.name) + '</div><div class="item-main"><div class="item-title">' + esc(title(p.name)) + (p.sameTeam ? ' <span class="chip green">this team</span>' : '') + '</div><div class="load">' + esc(p.reason) + '</div></div></div></div>'; }).join('') + '</div></details>';
         }
         if (reassign) h += '<div style="height:16px"></div><button class="btn primary" id="approveBtn"' + (sel ? '' : ' disabled') + '>Assign new inspector</button>' +
+          '<button class="btn ghost" id="cancelBtn" style="color:var(--red);border-color:var(--red);margin-top:10px">Cancel this inspection</button>' +
           '<p class="hint" style="text-align:center">' + (sel ? 'Assigning ' + esc(title(sel.name)) : 'Choose the new inspector') + '</p>';
         else h += '<div style="height:16px"></div><div class="row2"><button class="btn ghost" id="denyBtn" style="color:var(--red);border-color:var(--red)">Deny</button>' +
           '<button class="btn primary" id="approveBtn"' + (sel ? '' : ' disabled') + '>Approve</button></div>' +
@@ -934,6 +944,7 @@
         });
         if ($('moreBtn')) $('moreBtn').onclick = function () { showOthers = true; var y = s.scrollTop; draw(); $('sheet').scrollTop = y; };
         $('approveBtn').onclick = function () { if (sel) (reassign ? reassignTo(q, sel) : approve(q, sel, false)); };
+        if ($('cancelBtn')) $('cancelBtn').onclick = function () { cancelForm(q); };
         if ($('denyBtn')) $('denyBtn').onclick = function () { denyForm(q); };
       }
       draw();
@@ -982,6 +993,36 @@
         refresh();
       });
     });
+  }
+  function cancelForm(q) {
+    var reasons = ['No available inspector at the requested time', 'Requested by the requesting office', 'Goods not yet delivered', 'Incomplete documents'];
+    openSheet('<h3>Cancel inspection - ' + esc(q.office) + '</h3>' +
+      '<div class="item-sub" style="margin:-4px 0 12px">' + esc(q.dateText) + ' · ' + esc(q.timeText) + ' · ' + esc(q.ref || '') + '</div>' +
+      '<div class="field"><label>Reason for cancelling (sent to the requestor and COA)</label>' +
+      '<textarea id="cReason" rows="4" placeholder="State the reason"></textarea></div>' +
+      '<div class="meta" style="margin:-4px 0 16px">' + reasons.map(function (x) { return '<button class="chip" data-r="' + esc(x) + '" style="border:0">' + esc(x) + '</button>'; }).join('') + '</div>' +
+      '<button class="btn danger" id="cSend">Cancel inspection and notify</button><button class="btn link" id="cBack">Back</button>');
+    Array.prototype.forEach.call(document.querySelectorAll('[data-r]'), function (b) { b.onclick = function () { $('cReason').value = b.getAttribute('data-r'); }; });
+    $('cBack').onclick = function () { openRequest(q.row, true); };
+    $('cSend').onclick = function () {
+      var reason = $('cReason').value.trim();
+      if (!reason) return toast('Please state the reason.', true);
+      confirmBox('Cancel this inspection?',
+        'The approved inspection of <b>' + esc(q.office) + '</b> on <b>' + esc(q.dateText) + ' ' + esc(q.timeText) + '</b> will be marked <b>Cancelled</b>.' +
+        '<div class="note red" style="margin-bottom:0"><b>These will receive a cancellation email right away:</b>Requestor: ' + esc(q.reqEmail) + '<br>Commission on Audit<br>Monitoring copy</div>' +
+        '<p class="hint">' + esc(title(q.inspectorName)) + ' will get a phone notification. This cannot be undone.</p>',
+        'Cancel and send', 'Go back', true).then(function (y) {
+          if (!y) return;
+          busy(true);
+          call('cancel', { row: q.row, reason: reason }).then(function (r) {
+            busy(false);
+            if (!r.ok) return toast(r.error, true);
+            closeSheet();
+            toast('Inspection cancelled.' + (r.failed && r.failed.length ? ' Some emails failed: ' + r.failed.join('; ') : ' Notices sent.'), r.failed && r.failed.length);
+            refresh();
+          });
+        });
+    };
   }
   function denyForm(q) {
     var reasons = ['Incomplete documents', 'Insufficient notice before the schedule', 'Not within the scope of the Inspection Team'];
