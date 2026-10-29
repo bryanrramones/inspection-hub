@@ -5,6 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
+  var APP_VERSION = '21';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -212,7 +213,8 @@
       '<button data-m="refresh">🔄 Refresh</button>' +
       '<button data-m="push">🔔 ' + (pushOn ? 'Notifications are on - test again' : 'Turn on notifications') + '</button>' +
       '<button data-m="install">📲 Add to home screen</button>' +
-      '<button data-m="out">🚪 Sign out</button></div>');
+      '<button data-m="out">🚪 Sign out</button></div>' +
+      '<p class="hint" style="text-align:center;margin-top:10px">App version ' + APP_VERSION + '</p>');
     $('sheet').onclick = function (e) {
       var m = e.target.getAttribute('data-m');
       if (e.target.hasAttribute('data-close')) return closeSheet();
@@ -704,7 +706,7 @@
       if (list.length) {
         h += '<div class="shots">' + list.map(function (s) {
           var tag = s.status === 'saved' ? '✔ Saved' : s.status === 'failed' ? '⚠ Not saved' : s.status === 'waiting' ? '⏳ Waiting for signal' : '⬆ Uploading…';
-          return '<div class="shot"><img src="' + s.url + '" alt=""><span class="' + s.status + '">' + tag + '</span></div>';
+          return '<div class="shot" data-view="' + s.url + '"><img src="' + s.url + '" alt=""><span class="' + s.status + '">' + tag + '</span></div>';
         }).join('') + '</div>';
         if (waiting) h += '<button class="btn ghost" id="retryUp">Try uploading again</button>';
       }
@@ -714,6 +716,9 @@
       openSheet(h);
       $('sheet').scrollTop = y;
       $('snap').onclick = snap;
+      Array.prototype.forEach.call(document.querySelectorAll('[data-view]'), function (el) {
+        el.onclick = function () { viewPhoto(el.getAttribute('data-view')); };
+      });
       $('nativeCam').onclick = function (e) { e.preventDefault(); if (geo.fix) sheetNative(); else toast('Waiting for your location first.', true); };
       if ($('retryUp')) $('retryUp').onclick = function () { (shots[j.row] || []).forEach(function (s) { if (s.status !== 'saved') s.status = 'up'; }); draw(); uploadQueue(); };
     }
@@ -921,6 +926,17 @@
       });
     }
     draw();
+  }
+
+  /* Full-size view of a photo (the stamp sits at the bottom, so show the whole picture). */
+  function viewPhoto(url) {
+    var v = document.createElement('div');
+    v.className = 'viewer';
+    var img = document.createElement('img'); img.src = url; img.alt = '';
+    var x = document.createElement('button'); x.className = 'cam-x'; x.textContent = '×'; x.setAttribute('aria-label', 'Close');
+    v.appendChild(img); v.appendChild(x);
+    v.onclick = function () { v.remove(); };
+    document.body.appendChild(v);
   }
 
   /* ============ INSPECTOR: MY STATUS ============ */
