@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '30';
+  var APP_VERSION = '31';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -112,7 +112,39 @@
   }
 
   /* ============ SIGN IN ============ */
+  /* ---------- opening splash (Provincial Capitol + an inspection tip) ---------- */
+  var TIPS = [
+    { t: 'Check that the Acceptance and Inspection Report (AIR) is attached before approving a request.', lead: true },
+    { t: 'No AIR yet? Open the request and tap "Copy link" to send the upload page to the requestor.', lead: true },
+    { t: 'Search for an inspector by name, office, team, goods or status when assigning.', lead: true },
+    { t: 'Requests outside working hours or on weekends need an approved letter from the Local Chief Executive.', lead: true },
+    { t: 'Put a request on hold when its documents are not ready - the requestor gets an email right away.', lead: true },
+    { t: 'Tap "I accept this assignment" as soon as you can, so the team knows you are going.', insp: true },
+    { t: 'Can\'t make it? Tap "I can\'t right now" early so a leader can assign someone else.', insp: true },
+    { t: 'Compare the delivered items with the PO and the AIR: quantity, brand, model and specifications.', insp: true },
+    { t: 'Geotagged photos open after you submit your report.', insp: true },
+    { t: 'No signal on site? Your photos stay on your phone and are sent once you are back online.', insp: true },
+    { t: 'Going on leave or official business? Set it in My Status so you won\'t be assigned.' },
+    { t: 'Turn on notifications so you never miss a new request or assignment.' }
+  ];
+  var splashAt = Date.now(), splashGone = false;
+  function splashTip() {
+    var me = state.me || {}, list = TIPS.filter(function (x) { return (!x.lead || me.isLeader) && (!x.insp || me.isInspector) || (!x.lead && !x.insp); });
+    if (!list.length) return;
+    $('splashTipText').textContent = list[Math.floor(Math.random() * list.length)].t;
+    $('splashTip').classList.remove('hidden');
+  }
+  function splashDone(now) {
+    if (splashGone) return;
+    var sp = $('splash'); if (!sp) { splashGone = true; return; }
+    var wait = now ? 0 : Math.max(0, 900 - (Date.now() - splashAt));
+    splashGone = true;
+    setTimeout(function () { sp.classList.add('out'); setTimeout(function () { sp.remove(); }, 400); }, wait);
+  }
+  function emptyArt(text) { return '<div class="empty art"><svg viewBox="0 0 360 230" aria-hidden="true"><use href="#capline"/></svg>' + text + '</div>'; }
+
   function showFront() {
+    splashDone(true);
     $('app').classList.add('hidden'); $('front').classList.remove('hidden');
     $('stepEmail').classList.remove('hidden'); $('stepCode').classList.add('hidden');
     $('email').value = store('get', KEY.email) || '';
@@ -171,6 +203,7 @@
     return t;
   }
   function startApp() {
+    if (!splashGone) { splashTip(); setTimeout(function () { splashDone(); }, 8000); }
     $('front').classList.add('hidden'); $('app').classList.remove('hidden');
     $('hello').textContent = 'Hi, ' + (state.me.nick || firstName(state.me.name)) + (state.me.isLeader ? ' · ' + (state.me.role || 'Team Leader') : ' · Inspector');
     var tabs = myTabs();
@@ -239,14 +272,14 @@
   function load(a, tab, draw) {
     var c = savedOf(a), sig = null;
     if (c) {
-      draw(c.r, true);
+      draw(c.r, true); splashDone();
       sig = JSON.stringify(c.r);
       if (c.at < dirtyAt) $('view').classList.add('stale');
     }
     updating(true);
     fetchFresh(a).then(function (r) {
       if (state.tab !== tab) return;
-      updating(false);
+      updating(false); splashDone();
       if (!r.ok) {
         if (!c) return draw(r);
         if (r.offline) {
@@ -288,6 +321,7 @@
     setTimeout(prefetch, 3000);
   }
   function failView(r) {
+    splashDone();
     $('view').innerHTML = '<div class="empty">' + esc(r.error || 'Something went wrong.') + '<br><br><button class="btn ghost" id="retry" style="max-width:200px;margin:0 auto">Try again</button></div>';
     $('retry').onclick = refresh;
   }
@@ -408,7 +442,7 @@
       var html = offlineNote + pushBanner();
       html += '<h2 class="sec">Upcoming inspections</h2>';
       html += r.upcoming.length ? '<div class="list">' + r.upcoming.map(jobCard).join('') + '</div>'
-        : '<div class="empty">No inspections assigned to you yet.<br>You will get a notification when you are assigned.</div>';
+        : emptyArt('No inspections assigned to you yet.<br>You will get a notification when you are assigned.');
       if (r.recent.length) {
         html += '<h2 class="sec">Last 14 days</h2><div class="list">' + r.recent.map(jobCard).join('') + '</div>';
       }
@@ -577,7 +611,7 @@
           '<div class="load">' + esc(whenText(n.t)) + (unread ? ' · <b style="color:var(--red)">New</b>' : '') + '</div>' +
           '</div></div></' + (can ? 'button' : 'div') + '>';
       }).join('') + '</div>'
-        : '<div class="empty">No notifications in the last 30 days.</div>';
+        : emptyArt('No notifications in the last 30 days.');
       $('view').innerHTML = html;
       wirePushBanner();
       Array.prototype.forEach.call(document.querySelectorAll('[data-go]'), function (b) {
@@ -1140,7 +1174,7 @@
         '<div class="item-title" style="margin-top:6px">' + esc(entryText(e)) + '</div>' +
         (e.note ? '<div class="item-sub">' + esc(e.note) + '</div>' : '') +
         '</div><button class="btn link" style="width:auto;margin:0" data-remove="' + esc(e.id) + '">Cancel</button></div></div>';
-    }).join('') + '</div>' : '<div class="empty">Nothing scheduled - ' + (person ? 'available' : 'you are available') + ' every working day.</div>';
+    }).join('') + '</div>' : (person ? '<div class="empty">Nothing scheduled - available every working day.</div>' : emptyArt('Nothing scheduled - you are available every working day.'));
     return html;
   }
   function wireStatusPage(person, root) {
@@ -1213,7 +1247,7 @@
         }).join('') + '</div>';
       }
       html += '<h2 class="sec">Waiting for a decision (' + r.pending.length + ')</h2>';
-      html += r.pending.length ? '<div class="list">' + r.pending.map(reqCard).join('') + '</div>' : '<div class="empty">All caught up. New requests will appear here, and you will get a notification.</div>';
+      html += r.pending.length ? '<div class="list">' + r.pending.map(reqCard).join('') + '</div>' : emptyArt('All caught up. New requests will appear here, and you will get a notification.');
       var held = r.onhold || [];
       if (held.length) {
         html += '<h2 class="sec">On hold - documents not ready (' + held.length + ')</h2><div class="list">' + held.map(function (q) {
