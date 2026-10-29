@@ -1030,6 +1030,17 @@
       }
       html += '<h2 class="sec">Waiting for a decision (' + r.pending.length + ')</h2>';
       html += r.pending.length ? '<div class="list">' + r.pending.map(reqCard).join('') + '</div>' : '<div class="empty">All caught up. New requests will appear here, and you will get a notification.</div>';
+      var held = r.onhold || [];
+      if (held.length) {
+        html += '<h2 class="sec">On hold - documents not ready (' + held.length + ')</h2><div class="list">' + held.map(function (q) {
+          return '<button class="item" data-hold="' + q.row + '"><div class="item-top">' + dateBox(q.start) +
+            '<div class="item-main"><div class="item-title">' + esc(q.office) + '</div>' +
+            '<div class="item-sub">🕘 ' + esc(q.timeText || '-') + ' · 📍 ' + esc(q.place || '-') + '</div>' +
+            '<div class="item-sub">⏸ ' + esc(String(q.hold).split(' | ')[0]) + '</div>' +
+            '<div class="meta"><span class="chip amber">On hold</span><span class="chip">' + esc((String(q.hold).split(' | ')[1] || '').replace(/^by /, 'by ')) + '</span></div></div></div></button>';
+        }).join('') + '</div>';
+      }
+      state.held = held;
       if (r.decided.length) {
         html += '<h2 class="sec">Recently decided</h2><div class="list">' + r.decided.slice(0, 12).map(function (d) {
           var open = d.action === 'Approved' && (!d.start || d.start > Date.now() - 12 * 36e5);
@@ -1042,6 +1053,9 @@
       wirePushBanner();
       Array.prototype.forEach.call(document.querySelectorAll('[data-row]'), function (b) {
         b.onclick = function () { openRequest(+b.getAttribute('data-row'), b.hasAttribute('data-re')); };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-hold]'), function (b) {
+        b.onclick = function () { var row = +b.getAttribute('data-hold'); resumeForm((state.held || []).filter(function (x) { return x.row === row; })[0]); };
       });
     });
   }
@@ -1102,6 +1116,7 @@
           '<p class="hint" style="text-align:center">' + (sel ? 'Assigning ' + esc(title(sel.name)) : 'Choose the new inspector') + '</p>';
         else h += '<div style="height:16px"></div><div class="row2"><button class="btn ghost" id="denyBtn" style="color:var(--red);border-color:var(--red)">Deny</button>' +
           '<button class="btn primary" id="approveBtn"' + (sel ? '' : ' disabled') + '>Approve</button></div>' +
+          '<button class="btn ghost" id="holdBtn" style="margin-top:10px">⏸ Put on hold - documents not ready</button>' +
           '<p class="hint" style="text-align:center">' + (sel ? 'Assigning ' + esc(title(sel.name)) + (sel.clash ? ' · <span style="color:#a15c00">⚠ has another inspection around this time</span>' : '') : 'Choose an inspector to approve') + '</p>';
         var s = openSheet(h);
         Array.prototype.forEach.call(s.querySelectorAll('[data-pick]'), function (b) {
@@ -1113,6 +1128,7 @@
         $('approveBtn').onclick = function () { if (sel) (reassign ? reassignTo(q, sel) : approve(q, sel, false)); };
         if ($('cancelBtn')) $('cancelBtn').onclick = function () { cancelForm(q); };
         if ($('denyBtn')) $('denyBtn').onclick = function () { denyForm(q); };
+        if ($('holdBtn')) $('holdBtn').onclick = function () { holdForm(q); };
       }
       draw();
     });
@@ -1189,6 +1205,63 @@
             refresh();
           });
         });
+    };
+  }
+  function holdForm(q) {
+    var reasons = ['Documents not yet complete', 'Purchase Order not yet issued', 'Invoice / delivery receipt not yet available', 'Other'];
+    var pick = '';
+    function draw() {
+      var note = $('hNote') ? $('hNote').value : '';
+      openSheet('<h3>Put on hold - ' + esc(q.office) + '</h3>' +
+        '<div class="item-sub" style="margin:-4px 0 12px">' + esc(q.dateText) + ' · ' + esc(q.timeText) + '</div>' +
+        '<label class="lbl">What is not yet ready?</label><div class="meta" style="margin:0 0 10px">' + reasons.map(function (x) {
+          return '<button class="chip' + (pick === x ? ' amber' : '') + '" data-r="' + esc(x) + '" style="border:0">' + (pick === x ? '✓ ' : '') + esc(x) + '</button>';
+        }).join('') + '</div>' +
+        '<div class="field"><label>Details (sent to the requestor)</label><textarea id="hNote" rows="3" placeholder="e.g. Sales invoice and delivery receipt still being prepared">' + esc(note) + '</textarea></div>' +
+        '<p class="hint">The requestor (' + esc(q.reqEmail) + ') will be emailed that the inspection will be scheduled once the documents are complete. COA is not notified. The other leaders get a phone notification.</p>' +
+        '<button class="btn primary" id="hSend">Put on hold and notify the requestor</button><button class="btn link" id="hBack">Back</button>');
+      Array.prototype.forEach.call(document.querySelectorAll('[data-r]'), function (b) { b.onclick = function () { pick = b.getAttribute('data-r'); draw(); }; });
+      $('hBack').onclick = function () { openRequest(q.row); };
+      $('hSend').onclick = function () {
+        var note2 = $('hNote').value.trim();
+        if (!pick && !note2) return toast('Please choose or type what is not yet ready.', true);
+        if (pick === 'Other' && !note2) return toast('Please type the details.', true);
+        busy(true);
+        call('hold', { row: q.row, reason: pick, note: note2 }).then(function (r) {
+          busy(false);
+          if (!r.ok) return toast(r.error, true);
+          closeSheet();
+          toast('Put on hold.' + (r.failed && r.failed.length ? ' Email not sent: ' + r.failed.join('; ') : ' The requestor has been emailed.'), r.failed && r.failed.length);
+          refresh();
+        });
+      };
+    }
+    draw();
+  }
+  function resumeForm(q) {
+    if (!q) return;
+    var hm = '';
+    if (q.start) { var pp = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(q.start)); hm = pp; }
+    openSheet('<h3>⏸ On hold - ' + esc(q.office) + '</h3>' +
+      '<div class="note amber" style="margin-top:0"><b>' + esc(String(q.hold).split(' | ')[0]) + '</b>' + esc(String(q.hold).split(' | ').slice(1).join(' · ')) + '</div>' +
+      '<dl class="kv"><dt>Requested</dt><dd>' + esc(q.dateText) + ' · ' + esc(q.timeText) + '</dd><dt>Venue</dt><dd>' + esc(q.place) + '</dd>' +
+      '<dt>Requested by</dt><dd>' + esc(q.personnel) + '</dd><dt>Email</dt><dd>' + esc(q.reqEmail) + '</dd></dl>' +
+      '<h2 class="sec">Documents ready? Resume the request</h2>' +
+      '<div class="row2 field"><div><label>Inspection date</label><input type="date" id="rDate" value="' + (q.start ? ymdOf(q.start) : '') + '"></div>' +
+      '<div><label>Time</label><input type="time" id="rTime" value="' + hm + '"></div></div>' +
+      '<p class="hint">Change the date or time if the office gave a new schedule. The request goes back to "Waiting for a decision", where you approve it as usual.</p>' +
+      '<button class="btn primary" id="rGo">Resume</button>');
+    $('rGo').onclick = function () {
+      var p = { row: q.row };
+      var nd = $('rDate').value, nt = $('rTime').value;
+      if (nd && nd !== (q.start ? ymdOf(q.start) : '')) p.date = nd;
+      if (nt && nt !== hm) p.time = nt;
+      busy(true);
+      call('resume', p).then(function (r) {
+        busy(false);
+        if (!r.ok) return toast(r.error, true);
+        closeSheet(); toast('Resumed. It is back in Waiting for a decision.'); refresh();
+      });
     };
   }
   function denyForm(q) {
