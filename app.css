@@ -218,3 +218,8 @@ a.chip { text-decoration: none; }
 .notif.unread { border-color: var(--orange); background: #fffaf3; }
 .notif .item-sub { white-space: normal; }
 .tab { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.choice button.sel.ok { border-color: var(--green); background: #effaf2; box-shadow: 0 0 0 2px rgba(27,127,59,.15); }
+.lbl { display: block; font-size: 13px; font-weight: 700; color: var(--ink2, #37474f); margin: 4px 2px 8px; }
+.report-prev { position: relative; border-radius: 12px; overflow: hidden; background: #000; margin-bottom: 4px; }
+.report-prev img { display: block; width: 100%; max-height: 320px; object-fit: contain; }
+.report-prev .btn { position: absolute; right: 8px; bottom: 8px; width: auto; background: rgba(255,255,255,.92); border-radius: 8px; padding: 6px 12px; margin: 0; }

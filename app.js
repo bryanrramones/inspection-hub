@@ -333,6 +333,9 @@
       Array.prototype.forEach.call(document.querySelectorAll('[data-confirm]'), function (b) {
         b.onclick = function () { confirmJob(jobs[+b.getAttribute('data-confirm')]); };
       });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-done]'), function (b) {
+        b.onclick = function () { doneForm(jobs[+b.getAttribute('data-done')]); };
+      });
       Array.prototype.forEach.call(document.querySelectorAll('[data-cant]'), function (b) {
         b.onclick = function () { cantForm(jobs[+b.getAttribute('data-cant')]); };
       });
@@ -401,6 +404,10 @@
       (/NO REPORT/.test(f) ? '<span class="chip amber">Report not uploaded</span>' :
         (f === 'REJECTED' ? '<span class="chip red">Rejected</span>' : '<span class="chip">' + esc(f) + '</span>')));
     var past = j.start && j.start < Date.now();
+    var filed = f && !/No findings/i.test(f), due = !j.start || j.start <= Date.now() + 2 * 36e5;
+    var cal = past ? '' : '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(j.calendarLink) + '">Add to Calendar</a>';
+    var doneBtn = !due ? '' : (!filed ? '<button class="btn primary" data-done="' + j.row + '">✔ Done</button>'
+      : (/NO REPORT/.test(f) ? '<button class="btn ghost" data-done="' + j.row + '">📄 Add A&amp;I report</button>' : ''));
     return '<div class="item"><div class="item-top">' + dateBox(j.start) +
       '<div class="item-main"><div class="item-title">' + esc(j.office) + '</div>' +
       '<div class="item-sub">🕘 ' + esc(j.timeText || 'Time not stated') + '</div>' +
@@ -411,9 +418,7 @@
       '</div></div>' +
       (!past && !j.response ? '<div class="actions"><button class="btn ghost" data-cant="' + j.row + '" style="color:var(--red);border-color:var(--red)">I can\'t right now</button>' +
         '<button class="btn primary" data-confirm="' + j.row + '">✔ Confirm</button></div>' : '') +
-      (j.response === 'Declined' ? '' : '<div class="actions">' +
-      (past ? '' : '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(j.calendarLink) + '">Add to Calendar</a>') +
-      '<a class="btn primary" target="_blank" rel="noopener" href="' + esc(j.findingsLink) + '">File findings</a></div>') +
+      (j.response === 'Declined' || !(cal + doneBtn) ? '' : '<div class="actions">' + cal + doneBtn + '</div>') +
       (j.response === 'Declined' ? '' : '<div class="actions"><button class="btn ghost" data-photo="' + j.row + '">📷 Geotagged photos' + (j.photos ? ' · ' + j.photos + ' saved' : '') + '</button></div>') + '</div>';
   }
 
@@ -744,11 +749,13 @@
   var cam = null, sheetNative = null;
   function camGeo() {
     var el = document.getElementById('camGeo'); if (!el) return;
+    if (cam && cam.opts.hint) { el.innerHTML = esc(cam.opts.hint); var bb = document.getElementById('camShut'); if (bb) bb.disabled = cam.busy; return; }
     el.innerHTML = geo.fix ? '📍 ' + dms(geo.fix.lat, 'N', 'S') + ', ' + dms(geo.fix.lng, 'E', 'W') + ' (±' + geo.fix.acc + ' m)' + (geo.place ? '<br>' + esc(geo.place) : '')
       : '📍 Finding your location…';
     var b = document.getElementById('camShut'); if (b) b.disabled = !geo.fix || cam.busy;
   }
-  function openCam(j, process, onClose) {
+  function openCam(j, process, onClose, opts) {
+    opts = opts || {};
     if (cam) return;
     var wrap = document.createElement('div');
     wrap.id = 'cam'; wrap.className = 'cam';
@@ -760,7 +767,7 @@
       '<button class="cam-flip" id="camFlip" aria-label="Switch camera">⟲</button></div>' +
       '<div class="cam-ref">' + esc(j.ref || '') + ' · ' + esc(j.office || '') + '</div>';
     document.body.appendChild(wrap);
-    cam = { wrap: wrap, stream: null, facing: 'environment', busy: false, taken: 0, pushed: false };
+    cam = { wrap: wrap, stream: null, facing: 'environment', busy: false, taken: 0, pushed: false, opts: opts };
     try { history.pushState({ cam: 1 }, ''); cam.pushed = true; } catch (e) { }
     var vid = document.getElementById('camVid');
     function stop() { if (cam && cam.stream) { cam.stream.getTracks().forEach(function (t) { t.stop(); }); cam.stream = null; } }
@@ -776,7 +783,7 @@
           : 'The camera could not be started.') + '<br><button class="btn primary" id="camNative">Use the phone\'s camera app</button>');
       }).then(function () {
         var nb = document.getElementById('camNative');
-        if (nb) nb.onclick = function () { close(); if (sheetNative) sheetNative(); };
+        if (nb) nb.onclick = function () { close(); if (opts.native) opts.native(); else if (sheetNative) sheetNative(); };
       });
     }
     function close(fromBack) {
@@ -795,7 +802,7 @@
     document.getElementById('camFlip').onclick = function () { cam.facing = cam.facing === 'environment' ? 'user' : 'environment'; start(); };
     document.getElementById('camShut').onclick = function () {
       if (!cam || cam.busy || !vid.videoWidth) return;
-      if (!geo.fix) return toast('Waiting for your location first.', true);
+      if (!opts.hint && !geo.fix) return toast('Waiting for your location first.', true);
       var cv = document.createElement('canvas'); cv.width = vid.videoWidth; cv.height = vid.videoHeight;
       cv.getContext('2d').drawImage(vid, 0, 0);
       var fl = document.getElementById('camFlash'); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
@@ -811,11 +818,107 @@
           var th = document.getElementById('camThumb');
           th.style.backgroundImage = 'url(' + shot.url + ')';
           document.getElementById('camCount').textContent = cam.taken;
+          if (opts.single) close();
         }
       });
     };
     camGeo();
     start();
+  }
+
+  /* ============ INSPECTOR: DONE (findings) ============
+     Replaces the long findings form: result, reasons if not accepted, and a photo of the
+     signed Acceptance & Inspection Report. Saved to the Response tab in the same columns
+     the Google Form uses, so the Control Panel findings columns keep working. */
+  function toJpeg(src, max, q) {
+    return (src instanceof Blob ? createImageBitmap(src, { imageOrientation: 'from-image' }) : Promise.resolve(src)).then(function (img) {
+      var w = img.width, h = img.height, k = Math.min(1, max / Math.max(w, h));
+      var cv = document.createElement('canvas'); cv.width = Math.round(w * k); cv.height = Math.round(h * k);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      return new Promise(function (res) { cv.toBlob(res, 'image/jpeg', q); });
+    });
+  }
+  function doneForm(j) {
+    if (!j) return;
+    var REASONS = ['Discrepancy in quantity', 'Not compliant with specs', 'Incomplete documents', 'Other'];
+    var d = { result: '', reasons: [], note: '', report: null, url: '' };
+    var noReport = /NO REPORT/.test(j.findings || '');
+    if (noReport) d.result = 'Approved';
+    function draw() {
+      var y = $('sheet').scrollTop;
+      var h = '<h3>✔ Inspection done</h3>' +
+        '<div class="item-sub" style="margin:-4px 0 14px">' + esc(j.office) + ' · ' + esc(j.ref) + '</div>' +
+        '<label class="lbl">How did it go?</label><div class="choice" style="margin-bottom:14px">' +
+        '<button data-res="Approved" class="' + (d.result === 'Approved' ? 'sel ok' : '') + '"><span class="ic">✅</span><div><b>Accepted</b><span>Everything is okay</span></div></button>' +
+        '<button data-res="Rejected" class="' + (d.result === 'Rejected' ? 'sel' : '') + '"><span class="ic">❌</span><div><b>Not accepted</b><span>There is a discrepancy or another problem</span></div></button></div>';
+      if (d.result === 'Rejected') {
+        h += '<label class="lbl">Why? (choose all that apply)</label><div class="meta" style="margin:0 0 10px">' + REASONS.map(function (x) {
+          return '<button class="chip' + (d.reasons.indexOf(x) > -1 ? ' red' : '') + '" data-why="' + esc(x) + '" style="border:0">' + (d.reasons.indexOf(x) > -1 ? '✓ ' : '') + esc(x) + '</button>';
+        }).join('') + '</div>';
+      }
+      if (d.result) {
+        h += '<div class="field"><label>' + (d.result === 'Rejected' ? 'Details' + (d.reasons.indexOf('Other') > -1 ? ' (required)' : ' (optional)') : 'Remarks (optional)') + '</label>' +
+          '<textarea id="dNote" rows="3" placeholder="' + (d.result === 'Rejected' ? 'e.g. 20 of 50 boxes delivered; wrong brand of cement' : 'e.g. Delivered complete and in good condition') + '">' + esc(d.note) + '</textarea></div>' +
+          '<label class="lbl">Signed Acceptance &amp; Inspection Report</label>' +
+          (d.url ? '<div class="report-prev"><img src="' + d.url + '" alt=""><button class="btn link" id="dRetake">Retake</button></div>'
+            : '<button class="btn ghost" id="dCam">📷 Take photo of the signed report</button>' +
+              '<p class="hint" style="text-align:center;margin-top:6px"><a class="inline" href="#" id="dGal">or choose from gallery</a></p>') +
+          '<div style="height:10px"></div><button class="btn primary" id="dSend">Submit</button>';
+      }
+      h += '<p class="hint" style="text-align:center;margin-top:12px"><a class="inline" target="_blank" rel="noopener" href="' + esc(j.findingsLink) + '">Open the full findings form instead</a></p>';
+      openSheet(h); $('sheet').scrollTop = y;
+      Array.prototype.forEach.call(document.querySelectorAll('[data-res]'), function (b) {
+        b.onclick = function () { keepNote(); d.result = b.getAttribute('data-res'); draw(); };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-why]'), function (b) {
+        b.onclick = function () { keepNote(); var x = b.getAttribute('data-why'), i = d.reasons.indexOf(x); if (i > -1) d.reasons.splice(i, 1); else d.reasons.push(x); draw(); };
+      });
+      if ($('dCam')) $('dCam').onclick = takeReport;
+      if ($('dRetake')) $('dRetake').onclick = function () { keepNote(); d.report = null; d.url = ''; takeReport(); };
+      if ($('dGal')) $('dGal').onclick = function (e) {
+        e.preventDefault(); keepNote();
+        var inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
+        inp.onchange = function () { var f = inp.files && inp.files[0]; if (f) setReport(f); };
+        inp.click();
+      };
+      if ($('dSend')) $('dSend').onclick = submit;
+    }
+    function keepNote() { if ($('dNote')) d.note = $('dNote').value; }
+    function setReport(src) {
+      busy(true);
+      return toJpeg(src, 2000, 0.85).then(function (blob) {
+        busy(false); d.report = blob; d.url = URL.createObjectURL(blob); draw();
+        return { url: d.url };
+      }).catch(function () { busy(false); toast('The photo could not be read. Please try again.', true); return null; });
+    }
+    function takeReport() {
+      keepNote();
+      openCam(j, function (cv) { return setReport(cv); }, function () { draw(); },
+        { hint: 'Take a clear photo of the signed Acceptance & Inspection Report. Lay it flat with good light.', single: true,
+          native: function () { var inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture', 'environment'); inp.onchange = function () { var f = inp.files && inp.files[0]; if (f) setReport(f); }; inp.click(); } });
+    }
+    function submit() {
+      keepNote();
+      var note = d.note.trim();
+      if (d.result === 'Rejected' && !d.reasons.length && !note) return toast('Please choose or type the reason.', true);
+      if (d.reasons.indexOf('Other') > -1 && !note) return toast('Please type the details for "Other".', true);
+      var go = d.report ? Promise.resolve(true) : confirmBox('Submit without the report?',
+        'No photo of the signed Acceptance &amp; Inspection Report was added. The Control Panel will show <b>' + (d.result === 'Approved' ? 'Approved - NO REPORT' : 'no report') + '</b> until it is added.', 'Submit anyway', 'Add the photo');
+      go.then(function (y) {
+        if (!y) return;
+        busy(true);
+        (d.report ? b64(d.report) : Promise.resolve('')).then(function (data) {
+          return call('finish', { row: j.row, result: d.result, reasons: d.reasons, note: note, report: data });
+        }).then(function (r) {
+          busy(false);
+          if (!r.ok) return toast(r.error, true);
+          closeSheet();
+          toast(d.result === 'Approved' ? 'Saved. Thank you!' : 'Saved. The team leaders have been notified.');
+          refresh();
+        });
+      });
+    }
+    draw();
   }
 
   /* ============ INSPECTOR: MY STATUS ============ */
