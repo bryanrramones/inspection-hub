@@ -185,3 +185,4 @@ a.btn { text-align: center; text-decoration: none; }
 .menu-list button { display: block; width: 100%; text-align: left; background: #fff; border: 0; border-bottom: 1px solid var(--line); padding: 16px 4px; font-size: 15.5px; }
 .menu-list button:first-child { border-radius: 12px 12px 0 0; }
 a.inline { color: var(--green); font-weight: 600; }
+.choice button.sel { border-color: var(--red); background: #fff3ef; box-shadow: 0 0 0 2px rgba(211,47,47,.15); }
