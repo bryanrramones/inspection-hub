@@ -186,3 +186,10 @@ a.btn { text-align: center; text-decoration: none; }
 .menu-list button:first-child { border-radius: 12px 12px 0 0; }
 a.inline { color: var(--green); font-weight: 600; }
 .choice button.sel { border-color: var(--red); background: #fff3ef; box-shadow: 0 0 0 2px rgba(211,47,47,.15); }
+.shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+.shot { position: relative; border-radius: 10px; overflow: hidden; background: #000; aspect-ratio: 3 / 4; }
+.shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot span { position: absolute; left: 4px; right: 4px; bottom: 4px; font-size: 11px; font-weight: 600; text-align: center; border-radius: 6px; padding: 3px 2px; background: rgba(255,255,255,.92); color: #8a5a00; }
+.shot span.saved { color: #1b7f3b; }
+.shot span.failed { color: #c62828; }
+a.chip { text-decoration: none; }

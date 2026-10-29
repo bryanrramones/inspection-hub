@@ -89,7 +89,7 @@
     s.scrollTop = 0;
     return s;
   }
-  function closeSheet() { $('sheet').classList.add('hidden'); $('scrim').classList.add('hidden'); $('sheet').innerHTML = ''; }
+  function closeSheet() { geoStop(); redrawPhotos = null; $('sheet').classList.add('hidden'); $('scrim').classList.add('hidden'); $('sheet').innerHTML = ''; }
   $('scrim').addEventListener('click', closeSheet);
   $('sheet').addEventListener('click', function (e) { if (e.target.hasAttribute('data-close')) closeSheet(); });
 
@@ -174,6 +174,7 @@
     go(tabs.indexOf(want) > -1 ? want : tabs[0]);
     initPush();
     homeBar();
+    setTimeout(uploadQueue, 1500);
     if (isInstalled() && !store('get', KEY.installed)) { store('set', KEY.installed, '1'); toast('Inspection Hub is installed on this phone ✓'); }
     // refresh who I am in the background (roles may have changed)
     call('me', {}).then(function (r) {
@@ -310,7 +311,10 @@
       $('view').innerHTML = html;
       wirePushBanner();
       var jobs = {};
-      r.upcoming.forEach(function (j) { jobs[j.row] = j; });
+      r.upcoming.concat(r.recent).forEach(function (j) { jobs[j.row] = j; });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-photo]'), function (b) {
+        b.onclick = function () { photoSheet(jobs[+b.getAttribute('data-photo')]); };
+      });
       Array.prototype.forEach.call(document.querySelectorAll('[data-confirm]'), function (b) {
         b.onclick = function () { confirmJob(jobs[+b.getAttribute('data-confirm')]); };
       });
@@ -387,7 +391,263 @@
         '<button class="btn primary" data-confirm="' + j.row + '">✔ Confirm</button></div>' : '') +
       (j.response === 'Declined' ? '' : '<div class="actions">' +
       (past ? '' : '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(j.calendarLink) + '">Add to Calendar</a>') +
-      '<a class="btn primary" target="_blank" rel="noopener" href="' + esc(j.findingsLink) + '">File findings</a></div>') + '</div>';
+      '<a class="btn primary" target="_blank" rel="noopener" href="' + esc(j.findingsLink) + '">File findings</a></div>') +
+      (j.response === 'Declined' ? '' : '<div class="actions"><button class="btn ghost" data-photo="' + j.row + '">📷 Geotagged photos' + (j.photos ? ' · ' + j.photos + ' saved' : '') + '</button></div>') + '</div>';
+  }
+
+  /* ============ INSPECTOR: GEOTAGGED PHOTOS ============
+     Camera only. Each photo is stamped on the phone (seal, team, inspector, reference,
+     date/time, GPS, place), the GPS is also written into the file (EXIF), a copy is
+     saved on the phone, and it is uploaded to the inspection's Drive folder.
+     Uploads wait in a queue on the phone if there is no signal. */
+  var geo = { fix: null, watch: null, place: '', placeFor: '' };
+  var shots = {};            // row -> [{ url, status }] photos taken while the app is open
+  var sealImg = null;
+  function loadSeal() {
+    if (sealImg) return Promise.resolve(sealImg);
+    return new Promise(function (res) {
+      var i = new Image(); i.onload = function () { sealImg = i; res(i); }; i.onerror = function () { res(null); };
+      i.src = 'icons/seal-320.webp';
+    });
+  }
+  function geoStart(onUpdate) {
+    geoStop();
+    if (!navigator.geolocation) return onUpdate('nogeo');
+    geo.watch = navigator.geolocation.watchPosition(function (p) {
+      var c = p.coords;
+      if (!geo.fix || c.accuracy <= geo.fix.acc + 5 || Date.now() - geo.fix.t > 20000) {
+        geo.fix = { lat: c.latitude, lng: c.longitude, acc: Math.round(c.accuracy), t: Date.now() };
+      }
+      var k = geo.fix.lat.toFixed(3) + ',' + geo.fix.lng.toFixed(3);
+      if (geo.placeFor !== k) {
+        geo.placeFor = k;
+        call('place', { lat: geo.fix.lat, lng: geo.fix.lng }).then(function (r) { if (r.ok && geo.placeFor === k) { geo.place = r.place || ''; onUpdate(); } });
+      }
+      onUpdate();
+    }, function (err) { onUpdate(err && err.code === 1 ? 'denied' : 'error'); }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
+  }
+  function geoStop() { if (geo.watch != null && navigator.geolocation) navigator.geolocation.clearWatch(geo.watch); geo.watch = null; }
+  function waitFix(ms) {
+    return new Promise(function (res) {
+      var t0 = Date.now();
+      (function tick() {
+        if (geo.fix && Date.now() - geo.fix.t < 120000) return res(geo.fix);
+        if (Date.now() - t0 > ms) return res(null);
+        setTimeout(tick, 500);
+      })();
+    });
+  }
+  function dms(v, pos, neg) { return Math.abs(v).toFixed(5) + '° ' + (v >= 0 ? pos : neg); }
+
+  /* ---- the stamp ---- */
+  function stampPhoto(file, j, fix, place, when) {
+    return Promise.all([createImageBitmap(file, { imageOrientation: 'from-image' }), loadSeal()]).then(function (a) {
+      var img = a[0], seal = a[1];
+      var k = Math.min(1, 1600 / Math.max(img.width, img.height));
+      var W = Math.round(img.width * k), H = Math.round(img.height * k);
+      var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var g = cv.getContext('2d');
+      g.drawImage(img, 0, 0, W, H);
+      var base = Math.min(W, H), fs = Math.max(14, Math.round(base * 0.03)), lh = Math.round(fs * 1.32), pad = Math.round(fs * 0.8);
+      var lines = [
+        { t: 'PROVINCIAL GOVERNMENT OF QUIRINO', b: true, c: '#ffb74d' },
+        { t: 'INSPECTION TEAM', b: true, c: '#ffffff' },
+        { t: 'Inspector: ' + title(state.me.name), c: '#ffffff' },
+        { t: j.office || '', c: '#ffffff' },
+        { t: (j.ref || '') + '  ·  ' + when.text, c: '#ffffff' },
+        { t: dms(fix.lat, 'N', 'S') + ', ' + dms(fix.lng, 'E', 'W') + '  (±' + fix.acc + ' m)', c: '#ffe0b2' },
+        { t: place || 'Place name not available (no signal)', c: '#ffe0b2' }
+      ];
+      var bandH = pad * 2 + lh * lines.length;
+      var grd = g.createLinearGradient(0, H - bandH, 0, H);
+      grd.addColorStop(0, 'rgba(0,0,0,0.55)'); grd.addColorStop(1, 'rgba(0,0,0,0.75)');
+      g.fillStyle = grd; g.fillRect(0, H - bandH, W, bandH);
+      g.fillStyle = '#f57c00'; g.fillRect(0, H - bandH, W, Math.max(4, Math.round(fs * 0.22)));
+      var sealS = Math.round(Math.min(bandH - pad * 2, W * 0.22)), x = pad;
+      if (seal) { g.drawImage(seal, pad, H - bandH + (bandH - sealS) / 2, sealS, sealS); x = pad * 2 + sealS; }
+      var maxW = W - x - pad;
+      g.textBaseline = 'top';
+      g.shadowColor = 'rgba(0,0,0,0.6)'; g.shadowBlur = Math.round(fs * 0.15);
+      lines.forEach(function (L, i) {
+        g.font = (L.b ? '700 ' : '400 ') + fs + 'px Roboto, "Segoe UI", Arial, sans-serif';
+        g.fillStyle = L.c;
+        var t = L.t;
+        if (g.measureText(t).width > maxW) { while (t.length > 4 && g.measureText(t + '…').width > maxW) t = t.slice(0, -1); t += '…'; }
+        g.fillText(t, x, H - bandH + pad + i * lh);
+      });
+      return new Promise(function (res) { cv.toBlob(res, 'image/jpeg', 0.88); });
+    }).then(function (blob) { return blob.arrayBuffer(); }).then(function (buf) {
+      return new Blob([withExif(new Uint8Array(buf), fix, when, j)], { type: 'image/jpeg' });
+    });
+  }
+
+  /* ---- GPS inside the file (EXIF) so it is a true geotagged photo ---- */
+  function ascii(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7e]/g, '?'); }
+  function withExif(jpg, fix, when, j) {
+    var SZ = { 1: 1, 2: 1, 4: 4, 5: 8 };
+    function A(tag, s) { s = ascii(s) + '\0'; return { tag: tag, t: 2, len: s.length, v: s }; }
+    function R(tag, arr) { return { tag: tag, t: 5, len: arr.length, v: arr }; }
+    function deg(v) { v = Math.abs(v); var d = Math.floor(v), m = Math.floor((v - d) * 60), s = Math.round(((v - d) * 60 - m) * 60 * 10000); return [[d, 1], [m, 1], [s, 10000]]; }
+    var desc = 'Inspection Team, Provincial Government of Quirino - ' + (j.ref || '') + ' - ' + (j.office || '');
+    var ifd0 = [A(0x010E, desc), A(0x0132, when.exif), A(0x013B, state.me.name), { tag: 0x8769, t: 4, len: 1, v: 0 }, { tag: 0x8825, t: 4, len: 1, v: 0 }];
+    var exif = [A(0x9003, when.exif), A(0x9011, '+08:00')];
+    var gps = [{ tag: 0, t: 1, len: 4, v: [2, 3, 0, 0] }, A(1, fix.lat >= 0 ? 'N' : 'S'), R(2, deg(fix.lat)), A(3, fix.lng >= 0 ? 'E' : 'W'), R(4, deg(fix.lng)), R(0x1F, [[fix.acc, 1]])];
+    function size(es) { var d = 0; es.forEach(function (e) { var n = e.len * SZ[e.t]; if (n > 4) d += n + (n % 2); }); return 2 + 12 * es.length + 4 + d; }
+    var o0 = 8, o1 = o0 + size(ifd0), o2 = o1 + size(exif), total = o2 + size(gps);
+    ifd0[3].v = o1; ifd0[4].v = o2;
+    var tiff = new DataView(new ArrayBuffer(total));
+    tiff.setUint16(0, 0x4D4D); tiff.setUint16(2, 42); tiff.setUint32(4, 8);
+    function put(off, es) {
+      tiff.setUint16(off, es.length);
+      var data = off + 2 + 12 * es.length + 4;
+      es.forEach(function (e, i) {
+        var p = off + 2 + 12 * i, n = e.len * SZ[e.t], at = p + 8;
+        tiff.setUint16(p, e.tag); tiff.setUint16(p + 2, e.t); tiff.setUint32(p + 4, e.len);
+        if (n > 4) { tiff.setUint32(p + 8, data); at = data; data += n + (n % 2); }
+        if (e.t === 2) for (var c = 0; c < e.v.length; c++) tiff.setUint8(at + c, e.v.charCodeAt(c));
+        else if (e.t === 1) e.v.forEach(function (b, c) { tiff.setUint8(at + c, b); });
+        else if (e.t === 4) tiff.setUint32(at, e.v);
+        else e.v.forEach(function (r, c) { tiff.setUint32(at + c * 8, r[0]); tiff.setUint32(at + c * 8 + 4, r[1]); });
+      });
+      tiff.setUint32(off + 2 + 12 * es.length, 0);
+    }
+    put(o0, ifd0); put(o1, exif); put(o2, gps);
+    var seg = new Uint8Array(4 + 6 + total);
+    seg[0] = 0xFF; seg[1] = 0xE1; seg[2] = (seg.length - 2) >> 8; seg[3] = (seg.length - 2) & 255;
+    seg.set([0x45, 0x78, 0x69, 0x66, 0, 0], 4); seg.set(new Uint8Array(tiff.buffer), 10);
+    var rest = 2;   // drop the JFIF header the browser adds, keep everything else
+    if (jpg[2] === 0xFF && jpg[3] === 0xE0) rest = 4 + ((jpg[4] << 8) | jpg[5]);
+    var out = new Uint8Array(2 + seg.length + jpg.length - rest);
+    out.set([0xFF, 0xD8], 0); out.set(seg, 2); out.set(jpg.subarray(rest), 2 + seg.length);
+    return out;
+  }
+
+  /* ---- upload queue (kept on the phone until it reaches Drive) ---- */
+  function db() {
+    return new Promise(function (res, rej) {
+      try {
+        var q = indexedDB.open('inspection-hub', 1);
+        q.onupgradeneeded = function () { q.result.createObjectStore('photos', { keyPath: 'id' }); };
+        q.onsuccess = function () { res(q.result); }; q.onerror = function () { rej(q.error); };
+      } catch (e) { rej(e); }
+    });
+  }
+  function qDo(mode, fn) {
+    return db().then(function (d) {
+      return new Promise(function (res, rej) {
+        var tx = d.transaction('photos', mode), st = tx.objectStore('photos'), out = fn(st);
+        tx.oncomplete = function () { res(out && out.result !== undefined ? out.result : out); }; tx.onerror = function () { rej(tx.error); };
+      });
+    });
+  }
+  var memQueue = [];   // fallback if the phone blocks storage
+  function qAdd(item) { return qDo('readwrite', function (s) { s.put(item); }).catch(function () { memQueue.push(item); }); }
+  function qAll() { return qDo('readonly', function (s) { return s.getAll(); }).catch(function () { return []; }).then(function (a) { return (a || []).concat(memQueue); }); }
+  function qDel(id) { memQueue = memQueue.filter(function (x) { return x.id !== id; }); return qDo('readwrite', function (s) { s['delete'](id); }).catch(function () { }); }
+  function b64(blob) {
+    return new Promise(function (res) { var r = new FileReader(); r.onload = function () { res(String(r.result).split(',')[1]); }; r.readAsDataURL(blob); });
+  }
+  var uploading = false;
+  function uploadQueue() {
+    if (uploading || !state.token) return Promise.resolve();
+    uploading = true;
+    return qAll().then(function (items) {
+      return items.reduce(function (p, it) {
+        return p.then(function () {
+          return b64(it.blob).then(function (data) {
+            return call('uploadPhoto', { row: it.row, name: it.name, data: data, lat: it.lat, lng: it.lng, acc: it.acc, place: it.place, takenText: it.takenText });
+          }).then(function (r) {
+            var mine = (shots[it.row] || []).filter(function (s) { return s.id === it.id; })[0];
+            if (r.ok) {
+              if (mine) mine.status = 'saved';
+              photoCount[it.row] = r.count;
+              return qDel(it.id);
+            }
+            if (mine) mine.status = r.offline ? 'waiting' : 'failed';
+            if (!r.offline && r.error) toast(r.error, true);
+            if (r.offline) throw new Error('offline');
+          });
+        });
+      }, Promise.resolve());
+    }).catch(function () { }).then(function () { uploading = false; if (redrawPhotos) redrawPhotos(); });
+  }
+  window.addEventListener('online', function () { uploadQueue(); });
+  var photoCount = {}, redrawPhotos = null;
+
+  function nowStamp() {
+    var p = {};
+    new Intl.DateTimeFormat('en-GB', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date()).forEach(function (x) { p[x.type] = x.value; });
+    var mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+p.month - 1];
+    var h = +p.hour % 24, h12 = ((h + 11) % 12) + 1, hh = ('0' + h).slice(-2);
+    return {
+      text: mon + ' ' + (+p.day) + ', ' + p.year + '  ·  ' + h12 + ':' + p.minute + ':' + p.second + (h < 12 ? ' AM' : ' PM'),
+      exif: p.year + ':' + p.month + ':' + p.day + ' ' + hh + ':' + p.minute + ':' + p.second,
+      file: p.year + p.month + p.day + '-' + hh + p.minute + p.second
+    };
+  }
+  function saveToPhone(blob, name) {
+    try {
+      var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function photoSheet(j) {
+    if (!j) return;
+    if (photoCount[j.row] == null) photoCount[j.row] = j.photos || 0;
+    var geoMsg = '';
+    function draw() {
+      var list = shots[j.row] || [];
+      var waiting = list.filter(function (s) { return s.status !== 'saved'; }).length;
+      var loc = geo.fix
+        ? '📍 ' + dms(geo.fix.lat, 'N', 'S') + ', ' + dms(geo.fix.lng, 'E', 'W') + ' (±' + geo.fix.acc + ' m)' + (geo.place ? '<br>' + esc(geo.place) : '')
+        : (geoMsg === 'denied' ? '⚠️ Location is blocked. Allow Location for Inspection Hub in your phone settings, then try again.'
+          : geoMsg === 'nogeo' ? '⚠️ This phone cannot share its location.' : '📍 Finding your location… Turn on Location (GPS) if it is off.');
+      var h = '<h3>📷 Geotagged photos</h3>' +
+        '<div class="item-sub" style="margin:-4px 0 12px">' + esc(j.office) + ' · ' + esc(j.ref) + '</div>' +
+        '<div class="note ' + (geo.fix ? 'green' : 'amber') + '" style="margin-top:0">' + loc + '</div>' +
+        '<button class="btn primary" id="snap"' + (geo.fix ? '' : ' disabled') + '>📷 Take photo</button>' +
+        '<p class="hint" style="text-align:center">' + photoCount[j.row] + ' photo' + (photoCount[j.row] === 1 ? '' : 's') + ' saved in Drive for this inspection' +
+        (waiting ? ' · ' + waiting + ' waiting to upload' : '') + '.<br>Each photo is also saved on your phone (Downloads / Gallery).</p>';
+      if (list.length) {
+        h += '<div class="shots">' + list.map(function (s) {
+          var tag = s.status === 'saved' ? '✔ Saved' : s.status === 'failed' ? '⚠ Not saved' : s.status === 'waiting' ? '⏳ Waiting for signal' : '⬆ Uploading…';
+          return '<div class="shot"><img src="' + s.url + '" alt=""><span class="' + s.status + '">' + tag + '</span></div>';
+        }).join('') + '</div>';
+        if (waiting) h += '<button class="btn ghost" id="retryUp">Try uploading again</button>';
+      }
+      h += '<button class="btn link" data-close>Done</button>';
+      var y = $('sheet').scrollTop;
+      openSheet(h);
+      $('sheet').scrollTop = y;
+      $('snap').onclick = snap;
+      if ($('retryUp')) $('retryUp').onclick = function () { (shots[j.row] || []).forEach(function (s) { if (s.status !== 'saved') s.status = 'up'; }); draw(); uploadQueue(); };
+    }
+    function snap() {
+      var inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture', 'environment');
+      inp.onchange = function () {
+        var f = inp.files && inp.files[0]; if (!f) return;
+        busy(true);
+        waitFix(15000).then(function (fix) {
+          if (!fix) { busy(false); return toast('Your location was not found, so the photo was not saved. Turn on Location (GPS) and try again.', true); }
+          var when = nowStamp();
+          return stampPhoto(f, j, fix, geo.place, when).then(function (blob) {
+            var name = String(j.ref || 'INSPECTION').replace(/[^\w-]/g, '') + '_' + when.file + '.jpg';
+            var item = { id: name + '_' + Math.random().toString(36).slice(2, 7), row: j.row, name: name, blob: blob, lat: fix.lat.toFixed(6), lng: fix.lng.toFixed(6), acc: fix.acc, place: geo.place, takenText: when.text };
+            (shots[j.row] = shots[j.row] || []).push({ id: item.id, url: URL.createObjectURL(blob), status: 'up' });
+            saveToPhone(blob, name);
+            return qAdd(item).then(function () { busy(false); draw(); uploadQueue(); });
+          });
+        }).catch(function (e) { busy(false); toast('The photo could not be processed. Please try again.', true); });
+      };
+      inp.click();
+    }
+    redrawPhotos = function () { if ($('snap')) draw(); };
+    draw();
+    geoStart(function (msg) { geoMsg = msg || ''; if ($('snap')) draw(); });
   }
 
   /* ============ INSPECTOR: MY STATUS ============ */
@@ -501,7 +761,7 @@
         html += '<h2 class="sec">Recently decided</h2><div class="list">' + r.decided.slice(0, 12).map(function (d) {
           return '<div class="item"><div class="item-top">' + dateBox(d.start) + '<div class="item-main"><div class="item-title">' + esc(d.office) + '</div>' +
             '<div class="item-sub">' + (d.action === 'Approved' ? '👤 ' + esc(title(d.inspectorName)) : '✖ ' + esc(d.deniedWhy || 'Denied')) + '</div>' +
-            '<div class="meta">' + (d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector confirmed</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet confirmed</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + '</div></div></div></div>';
+            '<div class="meta">' + (d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector confirmed</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet confirmed</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + (d.photos && d.photoFolder ? '<a class="chip blue" target="_blank" rel="noopener" href="' + esc(d.photoFolder) + '">📷 ' + d.photos + ' photo' + (d.photos === 1 ? '' : 's') + '</a>' : '') + '</div></div></div></div>';
         }).join('') + '</div>';
       }
       $('view').innerHTML = html;

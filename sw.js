@@ -5,8 +5,8 @@ importScripts('config.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
 
-var CACHE = 'inspection-hub-v12';
-var SHELL = ['./', './index.html', './app.css?v=11', './app.js?v=11', './config.js?v=11', './manifest.webmanifest',
+var CACHE = 'inspection-hub-v13';
+var SHELL = ['./', './index.html', './app.css?v=12', './app.js?v=12', './config.js?v=12', './manifest.webmanifest',
   './icons/seal-320.webp', './icons/seal-96.webp', './icons/icon-192.png', './icons/favicon.png'];
 
 self.addEventListener('install', function (e) {
