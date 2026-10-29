@@ -441,7 +441,7 @@
 
   /* ---- the stamp ---- */
   function stampPhoto(file, j, fix, place, when) {
-    return Promise.all([createImageBitmap(file, { imageOrientation: 'from-image' }), loadSeal()]).then(function (a) {
+    return Promise.all([(file instanceof Blob ? createImageBitmap(file, { imageOrientation: 'from-image' }) : createImageBitmap(file)), loadSeal()]).then(function (a) {
       var img = a[0], seal = a[1];
       var k = Math.min(1, 1600 / Math.max(img.width, img.height));
       var W = Math.round(img.width * k), H = Math.round(img.height * k);
@@ -618,36 +618,121 @@
         }).join('') + '</div>';
         if (waiting) h += '<button class="btn ghost" id="retryUp">Try uploading again</button>';
       }
-      h += '<button class="btn link" data-close>Done</button>';
+      h += '<button class="btn link" data-close>Done</button>' +
+        '<p class="hint" style="text-align:center;margin-top:4px"><a class="inline" href="#" id="nativeCam">Camera not working? Use the phone\'s camera app</a></p>';
       var y = $('sheet').scrollTop;
       openSheet(h);
       $('sheet').scrollTop = y;
       $('snap').onclick = snap;
+      $('nativeCam').onclick = function (e) { e.preventDefault(); if (geo.fix) sheetNative(); else toast('Waiting for your location first.', true); };
       if ($('retryUp')) $('retryUp').onclick = function () { (shots[j.row] || []).forEach(function (s) { if (s.status !== 'saved') s.status = 'up'; }); draw(); uploadQueue(); };
     }
-    function snap() {
+    function process(src) {
+      return waitFix(15000).then(function (fix) {
+        if (!fix) { toast('Your location was not found, so the photo was not saved. Turn on Location (GPS) and try again.', true); return null; }
+        var when = nowStamp();
+        return stampPhoto(src, j, fix, geo.place, when).then(function (blob) {
+          var name = String(j.ref || 'INSPECTION').replace(/[^\w-]/g, '') + '_' + when.file + '.jpg';
+          var item = { id: name + '_' + Math.random().toString(36).slice(2, 7), row: j.row, name: name, blob: blob, lat: fix.lat.toFixed(6), lng: fix.lng.toFixed(6), acc: fix.acc, place: geo.place, takenText: when.text };
+          var shot = { id: item.id, url: URL.createObjectURL(blob), status: 'up' };
+          (shots[j.row] = shots[j.row] || []).push(shot);
+          saveToPhone(blob, name);
+          return qAdd(item).then(function () { draw(); uploadQueue(); return shot; });
+        });
+      }).catch(function () { toast('The photo could not be processed. Please try again.', true); return null; });
+    }
+    function snap() { openCam(j, process, function () { draw(); }); }
+    function nativeSnap() {
       var inp = document.createElement('input');
       inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture', 'environment');
       inp.onchange = function () {
         var f = inp.files && inp.files[0]; if (!f) return;
-        busy(true);
-        waitFix(15000).then(function (fix) {
-          if (!fix) { busy(false); return toast('Your location was not found, so the photo was not saved. Turn on Location (GPS) and try again.', true); }
-          var when = nowStamp();
-          return stampPhoto(f, j, fix, geo.place, when).then(function (blob) {
-            var name = String(j.ref || 'INSPECTION').replace(/[^\w-]/g, '') + '_' + when.file + '.jpg';
-            var item = { id: name + '_' + Math.random().toString(36).slice(2, 7), row: j.row, name: name, blob: blob, lat: fix.lat.toFixed(6), lng: fix.lng.toFixed(6), acc: fix.acc, place: geo.place, takenText: when.text };
-            (shots[j.row] = shots[j.row] || []).push({ id: item.id, url: URL.createObjectURL(blob), status: 'up' });
-            saveToPhone(blob, name);
-            return qAdd(item).then(function () { busy(false); draw(); uploadQueue(); });
-          });
-        }).catch(function (e) { busy(false); toast('The photo could not be processed. Please try again.', true); });
+        busy(true); process(f).then(function () { busy(false); });
       };
       inp.click();
     }
+    sheetNative = nativeSnap;
     redrawPhotos = function () { if ($('snap')) draw(); };
     draw();
-    geoStart(function (msg) { geoMsg = msg || ''; if ($('snap')) draw(); });
+    geoStart(function (msg) { geoMsg = msg || ''; if ($('snap')) draw(); camGeo(); });
+  }
+
+  /* ---- in-app camera (the phone never leaves the app) ---- */
+  var cam = null, sheetNative = null;
+  function camGeo() {
+    var el = document.getElementById('camGeo'); if (!el) return;
+    el.innerHTML = geo.fix ? '📍 ' + dms(geo.fix.lat, 'N', 'S') + ', ' + dms(geo.fix.lng, 'E', 'W') + ' (±' + geo.fix.acc + ' m)' + (geo.place ? '<br>' + esc(geo.place) : '')
+      : '📍 Finding your location…';
+    var b = document.getElementById('camShut'); if (b) b.disabled = !geo.fix || cam.busy;
+  }
+  function openCam(j, process, onClose) {
+    if (cam) return;
+    var wrap = document.createElement('div');
+    wrap.id = 'cam'; wrap.className = 'cam';
+    wrap.innerHTML = '<video id="camVid" playsinline muted autoplay></video><div class="cam-flash" id="camFlash"></div>' +
+      '<div class="cam-top"><button class="cam-x" id="camX" aria-label="Close camera">×</button><div class="cam-geo" id="camGeo"></div></div>' +
+      '<div class="cam-msg hidden" id="camMsg"></div>' +
+      '<div class="cam-bottom"><div class="cam-thumb" id="camThumb"><span id="camCount"></span></div>' +
+      '<button class="cam-shut" id="camShut" aria-label="Take photo" disabled><span></span></button>' +
+      '<button class="cam-flip" id="camFlip" aria-label="Switch camera">⟲</button></div>' +
+      '<div class="cam-ref">' + esc(j.ref || '') + ' · ' + esc(j.office || '') + '</div>';
+    document.body.appendChild(wrap);
+    cam = { wrap: wrap, stream: null, facing: 'environment', busy: false, taken: 0, pushed: false };
+    try { history.pushState({ cam: 1 }, ''); cam.pushed = true; } catch (e) { }
+    var vid = document.getElementById('camVid');
+    function stop() { if (cam && cam.stream) { cam.stream.getTracks().forEach(function (t) { t.stop(); }); cam.stream = null; } }
+    function msg(t) { var m = document.getElementById('camMsg'); m.innerHTML = t; m.classList.toggle('hidden', !t); }
+    function start() {
+      stop(); msg('');
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return msg('This phone does not allow the in-app camera.<br><button class="btn primary" id="camNative">Use the phone\'s camera app</button>');
+      navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: cam.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } } }).then(function (st) {
+        if (!cam) { st.getTracks().forEach(function (t) { t.stop(); }); return; }
+        cam.stream = st; vid.srcObject = st; vid.play().catch(function () { });
+      }).catch(function (e) {
+        msg((e && e.name === 'NotAllowedError' ? 'Camera is blocked. Allow <b>Camera</b> for Inspection Hub in your phone settings, then open the camera again.'
+          : 'The camera could not be started.') + '<br><button class="btn primary" id="camNative">Use the phone\'s camera app</button>');
+      }).then(function () {
+        var nb = document.getElementById('camNative');
+        if (nb) nb.onclick = function () { close(); if (sheetNative) sheetNative(); };
+      });
+    }
+    function close(fromBack) {
+      if (!cam) return;
+      stop(); document.removeEventListener('visibilitychange', vis); window.removeEventListener('popstate', back);
+      var pushed = cam.pushed; wrap.remove(); cam = null;
+      if (pushed && !fromBack) { try { history.back(); } catch (e) { } }
+      onClose();
+    }
+    function vis() { if (document.hidden) stop(); else if (cam && !cam.stream) start(); }
+    function back() { close(true); }
+    document.addEventListener('visibilitychange', vis);
+    window.addEventListener('popstate', back);
+    document.getElementById('camX').onclick = function () { close(); };
+    document.getElementById('camThumb').onclick = function () { close(); };
+    document.getElementById('camFlip').onclick = function () { cam.facing = cam.facing === 'environment' ? 'user' : 'environment'; start(); };
+    document.getElementById('camShut').onclick = function () {
+      if (!cam || cam.busy || !vid.videoWidth) return;
+      if (!geo.fix) return toast('Waiting for your location first.', true);
+      var cv = document.createElement('canvas'); cv.width = vid.videoWidth; cv.height = vid.videoHeight;
+      cv.getContext('2d').drawImage(vid, 0, 0);
+      var fl = document.getElementById('camFlash'); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
+      try { navigator.vibrate && navigator.vibrate(30); } catch (e) { }
+      cam.busy = true; camGeo();
+      var me = cam;
+      process(cv).then(function (shot) {
+        me.busy = false;
+        if (!cam) return;
+        camGeo();
+        if (shot) {
+          cam.taken++;
+          var th = document.getElementById('camThumb');
+          th.style.backgroundImage = 'url(' + shot.url + ')';
+          document.getElementById('camCount').textContent = cam.taken;
+        }
+      });
+    };
+    camGeo();
+    start();
   }
 
   /* ============ INSPECTOR: MY STATUS ============ */

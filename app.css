@@ -193,3 +193,23 @@ a.inline { color: var(--green); font-weight: 600; }
 .shot span.saved { color: #1b7f3b; }
 .shot span.failed { color: #c62828; }
 a.chip { text-decoration: none; }
+.cam { position: fixed; inset: 0; z-index: 200; background: #000; color: #fff; display: flex; flex-direction: column; }
+.cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.cam-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+.cam-flash.go { animation: camflash .35s ease-out; }
+@keyframes camflash { from { opacity: .85; } to { opacity: 0; } }
+.cam-top { position: relative; display: flex; align-items: flex-start; gap: 10px; padding: calc(env(safe-area-inset-top) + 12px) 14px 14px; background: linear-gradient(rgba(0,0,0,.65), rgba(0,0,0,0)); }
+.cam-x { flex: none; width: 42px; height: 42px; border-radius: 50%; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 28px; line-height: 1; }
+.cam-geo { flex: 1; font-size: 13px; line-height: 1.35; padding-top: 3px; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+.cam-msg { position: relative; margin: auto 24px; background: rgba(0,0,0,.75); border-radius: 14px; padding: 18px; text-align: center; font-size: 15px; line-height: 1.45; }
+.cam-msg .btn { margin-top: 14px; }
+.cam-bottom { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: space-between; padding: 22px 28px calc(env(safe-area-inset-bottom) + 34px); background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.7)); }
+.cam-thumb { width: 54px; height: 54px; border-radius: 10px; border: 2px solid #fff; background: rgba(255,255,255,.15) center / cover no-repeat; position: relative; }
+.cam-thumb span { position: absolute; top: -9px; right: -9px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: #f57c00; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.cam-thumb span:empty { display: none; }
+.cam-shut { width: 78px; height: 78px; border-radius: 50%; border: 5px solid #fff; background: transparent; padding: 5px; }
+.cam-shut span { display: block; width: 100%; height: 100%; border-radius: 50%; background: #f57c00; transition: transform .1s; }
+.cam-shut:active span { transform: scale(.88); }
+.cam-shut[disabled] { opacity: .45; }
+.cam-flip { width: 54px; height: 54px; border-radius: 50%; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 26px; }
+.cam-ref { position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 8px); text-align: center; font-size: 12px; opacity: .8; }
