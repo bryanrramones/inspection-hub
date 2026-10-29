@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '26';
+  var APP_VERSION = '27';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -171,7 +171,7 @@
   }
   function startApp() {
     $('front').classList.add('hidden'); $('app').classList.remove('hidden');
-    $('hello').textContent = 'Hi, ' + firstName(state.me.name) + (state.me.isLeader ? ' · ' + (state.me.role || 'Team Leader') : ' · Inspector');
+    $('hello').textContent = 'Hi, ' + (state.me.nick || firstName(state.me.name)) + (state.me.isLeader ? ' · ' + (state.me.role || 'Team Leader') : ' · Inspector');
     var tabs = myTabs();
     $('tabs').innerHTML = tabs.map(function (k) {
       return '<button class="tab" data-tab="' + k + '"><span class="ic">' + TABS[k].ic + '</span>' + TABS[k].label + '<span class="dot hidden" id="dot-' + k + '"></span></button>';
@@ -185,7 +185,7 @@
     if (isInstalled() && !store('get', KEY.installed)) { store('set', KEY.installed, '1'); toast('Inspection Hub is installed on this phone ✓'); }
     // refresh who I am in the background (roles may have changed)
     call('me', {}).then(function (r) {
-      if (r.ok) { state.me = r.me; store('set', KEY.me, JSON.stringify(r.me)); $('hello').textContent = 'Hi, ' + firstName(r.me.name) + (r.me.isLeader ? ' · ' + (r.me.role || 'Team Leader') : ' · Inspector'); }
+      if (r.ok) { state.me = r.me; store('set', KEY.me, JSON.stringify(r.me)); $('hello').textContent = 'Hi, ' + (r.me.nick || firstName(r.me.name)) + (r.me.isLeader ? ' · ' + (r.me.role || 'Team Leader') : ' · Inspector'); }
     });
   }
   $('tabs').addEventListener('click', function (e) {
