@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '38';
+  var APP_VERSION = '39';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -1381,6 +1381,35 @@
       (L.length > 1 ? '<details style="margin-top:6px"><summary class="hint" style="cursor:pointer;margin:0">Earlier (' + (L.length - 1) + ')</summary>' +
         L.slice(1).map(function (x) { return '<div class="hint" style="margin:4px 0">' + esc(x.what) + ' · ' + esc(x.when) + ' · ' + esc(x.by) + '</div>'; }).join('') + '</details>' : '') + '</div>';
   }
+  /* ---------- resend emails ---------- */
+  var RESEND_TO = { Approved: ['Requestor', 'Inspector', 'COA'], Denied: ['Requestor'], Cancelled: ['Requestor', 'COA'] };
+  function resendBtn(q) { return RESEND_TO[q.action] ? '<button class="btn ghost" id="resendBtn" style="margin-bottom:10px">↻ Resend emails</button>' : ''; }
+  function resendForm(q, back) {
+    var opts = RESEND_TO[q.action], m = mailLines(q)[0], failed = m && m.bad ? opts.filter(function (k) { return m.notsent.indexOf(k) > -1; }) : [];
+    var pre = failed.length ? failed : opts;
+    var label = { Requestor: 'Requestor (' + (q.reqEmail || 'no email') + ')', Inspector: 'Inspector (' + title(q.inspectorName || '') + ')', COA: 'Commission on Audit' };
+    var h = '<h3>Resend emails</h3><p class="hint" style="margin-top:-8px">' + esc(q.office) + ' · ' + esc(q.ref || '') + ' · ' + esc(q.action) + '</p>' +
+      (failed.length ? '<div class="note red" style="margin-top:0"><b>Last time these were not sent</b>' + esc(failed.join(', ')) + ' (already ticked below)</div>' : '') +
+      '<p class="hint">Who should receive the email again?</p><div class="list">' + opts.map(function (k) {
+        return '<label class="item" style="display:flex;gap:12px;align-items:center;cursor:pointer"><input type="checkbox" data-rs="' + k + '"' + (pre.indexOf(k) > -1 ? ' checked' : '') + ' style="width:22px;height:22px"><span>' + esc(label[k]) + '</span></label>';
+      }).join('') + '</div>' +
+      (/^TEST/i.test(q.office || '') ? '<p class="hint">Test request: emails go only to the team\'s test inbox.</p>' : '') +
+      '<div style="height:12px"></div><button class="btn primary" id="rsGo">Send again</button><button class="btn link" id="rsBack">← Back</button>';
+    openSheet(h);
+    $('rsBack').onclick = back;
+    $('rsGo').onclick = function () {
+      var to = Array.prototype.filter.call(document.querySelectorAll('[data-rs]'), function (c) { return c.checked; }).map(function (c) { return c.getAttribute('data-rs'); });
+      if (!to.length) return toast('Tick at least one.', true);
+      busy(true);
+      call('resend', { row: q.row, to: to }).then(function (r) {
+        busy(false);
+        if (!r.ok) return toast(r.error, true);
+        if (r.failed && r.failed.length) toast('Not sent: ' + r.failed.join('; '), true);
+        else toast('Sent again to ' + r.sent.join(', ') + '.');
+        refresh(); back();
+      });
+    };
+  }
   function mailChip(q) {
     var m = mailLines(q)[0];
     if (!m) return '';
@@ -1389,11 +1418,11 @@
   function mailNote(q) {
     var L = mailLines(q);
     if (!L.length) return q.action === 'Approved' || q.action === 'Denied' || q.action === 'Cancelled'
-      ? '<div class="note amber"><b>✉ No email record</b>No email was recorded for this request. It may have been decided before email tracking started, or in the spreadsheet without "Send notification".</div>' : '';
+      ? '<div class="note amber"><b>✉ No email record</b>No email was recorded for this request. It may have been decided before email tracking started, or in the spreadsheet without "Send notification". If in doubt, tap "Resend emails".</div>' : '';
     var m = L[0];
     var h = '<div class="note ' + (m.bad ? 'red' : 'green') + '"><b>' + (m.bad ? '✉ Some emails were NOT sent' : '✉ Emails sent') + '</b>' +
       esc(m.what) + ' · ' + esc(m.when) + '<br>' + (m.sent ? 'Sent to: ' + esc(m.sent) : 'Nothing sent') +
-      (m.bad ? '<br><span style="color:var(--red)">Not sent: ' + esc(m.notsent) + '</span><br>Use "Send notification" in the spreadsheet for this row to resend.' : '') +
+      (m.bad ? '<br><span style="color:var(--red)">Not sent: ' + esc(m.notsent) + '</span><br>Tap "Resend emails" below to try again.' : '') +
       (m.test ? '<br>Test request: sent only to the team\'s test inbox.' : '') +
       '<br><span class="hint" style="margin:0">by ' + esc(m.by) + '</span>';
     if (L.length > 1) h += '<details style="margin-top:6px"><summary class="hint" style="cursor:pointer;margin:0">Earlier emails (' + (L.length - 1) + ')</summary>' +
@@ -1538,7 +1567,7 @@
         h += q.air ? '<div class="note green"><b>📎 Acceptance and Inspection Report attached</b>' + q.air + ' file' + (q.air === 1 ? '' : 's') + ' sent by the requestor.<button class="btn ghost" id="airBtn" style="margin-top:8px">📄 View AIR</button></div>'
           : '<div class="note red"><b>No AIR Attached</b>No Acceptance and Inspection Report has been sent yet. The requestor can send it here, no sign-in needed:<br><span style="word-break:break-all">' + esc(AIR_PAGE) + '</span><button class="btn ghost" id="airCopy" style="margin-top:8px">Copy link to send to the requestor</button></div>';
         if (q.warnings && q.warnings.length) h += '<div class="note amber"><b>Outside normal working hours/days</b>' + q.warnings.map(esc).join('<br>') + '<br>An approved request letter from the Local Chief Executive is needed.</div>';
-        if (reassign) h += decNote(q) + mailNote(q) + toSection(q);
+        if (reassign) h += decNote(q) + mailNote(q) + resendBtn(q) + toSection(q);
         if (reassign && q.response === 'Declined') h += '<div class="note red"><b>' + esc(title(q.inspectorName)) + ' can\'t do this inspection.</b>' + esc(q.respWhy || 'No reason given') + '<br>Choose a new inspector below, or cancel the inspection.</div>';
         else if (reassign) h += '<div class="note green"><b>Approved · ' + esc(q.ref || '') + '</b>Assigned to ' + esc(title(q.inspectorName)) + (q.response === 'Confirmed' ? ' (accepted)' : ' (not yet accepted)') + '. You can change the inspector or cancel the inspection.</div>';
         if (q.start && q.start < Date.now()) h += '<div class="note red"><b>The requested schedule has already passed.</b>Check with the requesting office before approving.</div>';
@@ -1577,6 +1606,7 @@
         if ($('airBtn')) $('airBtn').onclick = function () { airSheet(q, function () { openRequest(row, reassign); }); };
         if ($('airCopy')) $('airCopy').onclick = function () { copyText(AIR_PAGE); };
         if (reassign) wireTo(q, function () { openRequest(row, reassign); });
+        if ($('resendBtn')) $('resendBtn').onclick = function () { resendForm(q, function () { openRequest(row, reassign); }); };
       }
       draw();
     });
@@ -1840,7 +1870,7 @@
         (a === 'Approved' ? '<dt>Inspector</dt><dd>' + esc(title(q.inspectorName)) + (q.response ? ' (' + (q.response === 'Confirmed' ? 'accepted' : esc(q.response.toLowerCase())) + ')' : '') + '</dd>' : '<dt>Reason</dt><dd>' + esc(q.deniedWhy || '-') + '</dd>') +
         (q.findings ? '<dt>Findings</dt><dd>' + esc(q.findings) + '</dd>' : '') +
         '<dt>Sheet row</dt><dd>' + q.row + '</dd></dl>';
-      h += decNote(q) + mailNote(q);
+      h += decNote(q) + mailNote(q) + resendBtn(q);
       if (q.air) h += '<button class="btn ghost" id="hAir" style="margin-bottom:10px">📄 View AIR (' + q.air + ' file' + (q.air === 1 ? '' : 's') + ')</button>';
       if (q.photos && q.photoFolder) h += '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(q.photoFolder) + '" style="text-align:center;text-decoration:none;margin-bottom:10px">📷 Geotagged photos (' + q.photos + ')</a>';
       if (a === 'Approved') h += toSection(q);
@@ -1848,6 +1878,7 @@
       var s = openSheet(h);
       if ($('hAir')) $('hAir').onclick = function () { airSheet(q, function () { histSheet(row); }); };
       if ($('hManage')) $('hManage').onclick = function () { openRequest(row, true); };
+      if ($('resendBtn')) $('resendBtn').onclick = function () { resendForm(q, function () { histSheet(row); }); };
       if (a === 'Approved') wireTo(q, function () { histSheet(row); });
     });
   }
