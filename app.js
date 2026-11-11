@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '35';
+  var APP_VERSION = '36';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -1348,7 +1348,7 @@
             '<div class="item-main"><div class="item-title">' + esc(q.office) + '</div>' +
             '<div class="item-sub">🕘 ' + esc(q.timeText || '-') + ' · 📍 ' + esc(q.place || '-') + '</div>' +
             '<div class="item-sub">⏸ ' + esc(String(q.hold).split(' | ')[0]) + '</div>' +
-            '<div class="meta"><span class="chip amber">On hold</span><span class="chip">' + esc((String(q.hold).split(' | ')[1] || '').replace(/^by /, 'by ')) + '</span></div></div></div></button>';
+            '<div class="meta"><span class="chip amber">On hold</span><span class="chip">' + esc((String(q.hold).split(' | ')[1] || '').replace(/^by /, 'by ')) + '</span>' + mailChip(q) + '</div></div></div></button>';
         }).join('') + '</div>';
       }
       state.held = held;
@@ -1357,7 +1357,7 @@
           var open = d.action === 'Approved' && (!d.start || d.start > Date.now() - 12 * 36e5);
           return (open ? '<button class="item" data-row="' + d.row + '" data-re="1">' : '<div class="item">') + '<div class="item-top">' + dateBox(d.start) + '<div class="item-main"><div class="item-title">' + esc(d.office) + '</div>' +
             '<div class="item-sub">' + (d.action === 'Approved' ? '👤 ' + esc(title(d.inspectorName)) : '✖ ' + esc(d.deniedWhy || d.action)) + '</div>' +
-            '<div class="meta">' + (d.action === 'Cancelled' ? '<span class="chip red">Cancelled</span>' : d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector accepted</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet accepted</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + (d.to ? (/^Signed/.test(d.toStatus) ? '<span class="chip green">🧾 TO signed</span>' : '<span class="chip blue">🧾 TO prepared</span>') : '') + (d.photos && d.photoFolder ? '<a class="chip blue" target="_blank" rel="noopener" href="' + esc(d.photoFolder) + '">📷 ' + d.photos + ' photo' + (d.photos === 1 ? '' : 's') + '</a>' : '') + '</div></div></div>' + (open ? '</button>' : '</div>');
+            '<div class="meta">' + (d.action === 'Cancelled' ? '<span class="chip red">Cancelled</span>' : d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector accepted</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet accepted</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + mailChip(d) + (d.to ? (/^Signed/.test(d.toStatus) ? '<span class="chip green">🧾 TO signed</span>' : '<span class="chip blue">🧾 TO prepared</span>') : '') + (d.photos && d.photoFolder ? '<a class="chip blue" target="_blank" rel="noopener" href="' + esc(d.photoFolder) + '">📷 ' + d.photos + ' photo' + (d.photos === 1 ? '' : 's') + '</a>' : '') + '</div></div></div>' + (open ? '</button>' : '</div>');
         }).join('') + '</div>';
       }
       $('view').innerHTML = html;
@@ -1370,6 +1370,33 @@
       });
     });
   }
+  /* ---------- email record (Control Panel column BG) ---------- */
+  function mailLines(q) {
+    return String(q.mailLog || '').split('\n').filter(String).map(function (l) {
+      var p = l.split(' | ');
+      return { when: p[0] || '', what: p[1] || '', sent: (p[2] || '').replace(/^Sent to: /, ''), bad: /NOT SENT/.test(l), notsent: (l.match(/NOT SENT: ([^|]*)/) || [])[1] || '', by: (l.match(/\| by (.*)$/) || [])[1] || '', test: /\[TEST/.test(l) };
+    });
+  }
+  function mailChip(q) {
+    var m = mailLines(q)[0];
+    if (!m) return '';
+    return m.bad ? '<span class="chip red">✉ Email not sent</span>' : '<span class="chip green">✉ Emails sent' + (m.test ? ' (test)' : '') + '</span>';
+  }
+  function mailNote(q) {
+    var L = mailLines(q);
+    if (!L.length) return q.action === 'Approved' || q.action === 'Denied' || q.action === 'Cancelled'
+      ? '<div class="note amber"><b>✉ No email record</b>No email was recorded for this request. It may have been decided before email tracking started, or in the spreadsheet without "Send notification".</div>' : '';
+    var m = L[0];
+    var h = '<div class="note ' + (m.bad ? 'red' : 'green') + '"><b>' + (m.bad ? '✉ Some emails were NOT sent' : '✉ Emails sent') + '</b>' +
+      esc(m.what) + ' · ' + esc(m.when) + '<br>' + (m.sent ? 'Sent to: ' + esc(m.sent) : 'Nothing sent') +
+      (m.bad ? '<br><span style="color:var(--red)">Not sent: ' + esc(m.notsent) + '</span><br>Use "Send notification" in the spreadsheet for this row to resend.' : '') +
+      (m.test ? '<br>Test request: sent only to the team\'s test inbox.' : '') +
+      '<br><span class="hint" style="margin:0">by ' + esc(m.by) + '</span>';
+    if (L.length > 1) h += '<details style="margin-top:6px"><summary class="hint" style="cursor:pointer;margin:0">Earlier emails (' + (L.length - 1) + ')</summary>' +
+      L.slice(1).map(function (x) { return '<div class="hint" style="margin:4px 0">' + esc(x.when) + ' · ' + esc(x.what) + ' · ' + (x.bad ? 'NOT SENT: ' + esc(x.notsent) : 'sent to ' + esc(x.sent)) + '</div>'; }).join('') + '</details>';
+    return h + '</div>';
+  }
+
   function reqCard(q) {
     var chips = '<span class="chip green">' + esc(q.goodsTeam || 'Goods type not stated') + '</span>';
     if (q.late) chips += '<span class="chip red">Schedule already passed</span>';
@@ -1507,7 +1534,7 @@
         h += q.air ? '<div class="note green"><b>📎 Acceptance and Inspection Report attached</b>' + q.air + ' file' + (q.air === 1 ? '' : 's') + ' sent by the requestor.<button class="btn ghost" id="airBtn" style="margin-top:8px">📄 View AIR</button></div>'
           : '<div class="note red"><b>No AIR Attached</b>No Acceptance and Inspection Report has been sent yet. The requestor can send it here, no sign-in needed:<br><span style="word-break:break-all">' + esc(AIR_PAGE) + '</span><button class="btn ghost" id="airCopy" style="margin-top:8px">Copy link to send to the requestor</button></div>';
         if (q.warnings && q.warnings.length) h += '<div class="note amber"><b>Outside normal working hours/days</b>' + q.warnings.map(esc).join('<br>') + '<br>An approved request letter from the Local Chief Executive is needed.</div>';
-        if (reassign) h += toSection(q);
+        if (reassign) h += mailNote(q) + toSection(q);
         if (reassign && q.response === 'Declined') h += '<div class="note red"><b>' + esc(title(q.inspectorName)) + ' can\'t do this inspection.</b>' + esc(q.respWhy || 'No reason given') + '<br>Choose a new inspector below, or cancel the inspection.</div>';
         else if (reassign) h += '<div class="note green"><b>Approved · ' + esc(q.ref || '') + '</b>Assigned to ' + esc(title(q.inspectorName)) + (q.response === 'Confirmed' ? ' (accepted)' : ' (not yet accepted)') + '. You can change the inspector or cancel the inspection.</div>';
         if (q.start && q.start < Date.now()) h += '<div class="note red"><b>The requested schedule has already passed.</b>Check with the requesting office before approving.</div>';
