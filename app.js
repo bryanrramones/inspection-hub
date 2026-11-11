@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '36';
+  var APP_VERSION = '37';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -189,6 +189,7 @@
   /* ============ APP SHELL ============ */
   var TABS = {
     requests: { label: 'Requests', ic: '📥', render: renderRequests },
+    history: { label: 'History', ic: '🗂️', render: renderHistory },
     team: { label: 'Team', ic: '👥', render: renderTeam },
     schedule: { label: 'Schedule', ic: '📅', render: renderSchedule },
     status: { label: 'My Status', ic: '🟢', render: renderStatus },
@@ -196,7 +197,7 @@
   };
   function myTabs() {
     var t = [];
-    if (state.me.isLeader) t.push('requests', 'team');
+    if (state.me.isLeader) t.push('requests', 'team', 'history');
     if (state.me.isInspector) t.push('schedule', 'status');
     if (!t.length) t.push('status');
     t.push('notifs');
@@ -238,7 +239,7 @@
      Each tab shows what was last saved on this phone right away, then quietly checks
      the engine and redraws only if something changed. After you do something
      (approve, accept, file...), saved screens are dimmed until fresh data arrives. */
-  var VIEW_ACTION = { requests: 'requests', team: 'team', schedule: 'mySchedule', status: 'myStatus', notifs: 'notifications' };
+  var VIEW_ACTION = { requests: 'requests', team: 'team', history: 'history', schedule: 'mySchedule', status: 'myStatus', notifs: 'notifications' };
   var mem = {}, inflight = {}, dirtyAt = 0, sugg = {};
   function savedOf(a) {
     if (mem[a]) return mem[a];
@@ -1352,14 +1353,7 @@
         }).join('') + '</div>';
       }
       state.held = held;
-      if (r.decided.length) {
-        html += '<h2 class="sec">Recently decided</h2><div class="list">' + r.decided.slice(0, 12).map(function (d) {
-          var open = d.action === 'Approved' && (!d.start || d.start > Date.now() - 12 * 36e5);
-          return (open ? '<button class="item" data-row="' + d.row + '" data-re="1">' : '<div class="item">') + '<div class="item-top">' + dateBox(d.start) + '<div class="item-main"><div class="item-title">' + esc(d.office) + '</div>' +
-            '<div class="item-sub">' + (d.action === 'Approved' ? '👤 ' + esc(title(d.inspectorName)) : '✖ ' + esc(d.deniedWhy || d.action)) + '</div>' +
-            '<div class="meta">' + (d.action === 'Cancelled' ? '<span class="chip red">Cancelled</span>' : d.action === 'Approved' ? '<span class="chip green">Approved</span>' + (d.response === 'Confirmed' ? '<span class="chip green">✔ Inspector accepted</span>' : d.response === 'Declined' ? '<span class="chip red">Inspector declined</span>' : (d.start && d.start > Date.now() ? '<span class="chip amber">Not yet accepted</span>' : '')) : '<span class="chip red">Denied</span>') + '<span class="chip gold">' + esc(d.ref) + '</span>' + (d.assignor ? '<span class="chip">by ' + esc(d.assignor) + '</span>' : '') + mailChip(d) + (d.to ? (/^Signed/.test(d.toStatus) ? '<span class="chip green">🧾 TO signed</span>' : '<span class="chip blue">🧾 TO prepared</span>') : '') + (d.photos && d.photoFolder ? '<a class="chip blue" target="_blank" rel="noopener" href="' + esc(d.photoFolder) + '">📷 ' + d.photos + ' photo' + (d.photos === 1 ? '' : 's') + '</a>' : '') + '</div></div></div>' + (open ? '</button>' : '</div>');
-        }).join('') + '</div>';
-      }
+      html += '<button class="btn link" id="toHistory" style="margin-top:14px">🗂️ Decided requests are in History</button>';
       $('view').innerHTML = html;
       wirePushBanner();
       Array.prototype.forEach.call(document.querySelectorAll('[data-row]'), function (b) {
@@ -1368,6 +1362,7 @@
       Array.prototype.forEach.call(document.querySelectorAll('[data-hold]'), function (b) {
         b.onclick = function () { var row = +b.getAttribute('data-hold'); resumeForm((state.held || []).filter(function (x) { return x.row === row; })[0]); };
       });
+      if ($('toHistory')) $('toHistory').onclick = function () { go('history'); };
     });
   }
   /* ---------- email record (Control Panel column BG) ---------- */
@@ -1749,6 +1744,102 @@
     openSheet(h);
     if ($('toPrep')) $('toPrep').onclick = function () { toForm({ row: q.row, office: q.office, ref: r.ref, action: 'Approved' }, function () { closeSheet(); }); };
     refresh();
+  }
+
+  /* ============ LEADER: HISTORY ============
+     All approved, denied and cancelled requests, newest first. The whole list is kept on the
+     phone, so filters and search are instant; 30 are drawn at a time. */
+  var HI = { row: 0, start: 1, office: 2, ref: 3, action: 4, insp: 5, goods: 6, po: 7, mail: 8, why: 9, by: 10, resp: 11, date: 12, time: 13, tracked: 14 };
+  state.hist = { status: 'all', q: '', month: '', mailIssue: false, shown: 30 };
+  function histMonth(ms) { return ms ? new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit' }).format(new Date(ms)) : ''; }
+  function histMonthLabel(ym) { var p = ym.split('-'); return new Date(+p[0], +p[1] - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }); }
+  function histFilter(items) {
+    var f = state.hist, words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
+    return items.filter(function (x) {
+      if (f.status !== 'all' && x[HI.action] !== f.status) return false;
+      if (f.month && histMonth(x[HI.start]) !== f.month) return false;
+      if (f.mailIssue && !(x[HI.mail] === 2 || (x[HI.mail] === 0 && x[HI.tracked]))) return false;
+      if (words.length) {
+        var hay = (x[HI.office] + ' ' + x[HI.ref] + ' ' + x[HI.insp] + ' ' + x[HI.goods] + ' ' + x[HI.po] + ' ' + x[HI.why] + ' ' + x[HI.by]).toLowerCase();
+        for (var i = 0; i < words.length; i++) if (hay.indexOf(words[i]) < 0) return false;
+      }
+      return true;
+    });
+  }
+  function histCard(x) {
+    var a = x[HI.action];
+    var chip = a === 'Approved' ? '<span class="chip green">Approved</span>' : a === 'Denied' ? '<span class="chip red">Denied</span>' : '<span class="chip red">Cancelled</span>';
+    var mail = x[HI.mail] === 1 ? '<span class="chip green">✉ Sent</span>' : x[HI.mail] === 3 ? '<span class="chip">✉ Test</span>' : x[HI.mail] === 2 ? '<span class="chip red">✉ Not sent</span>' : (x[HI.tracked] ? '<span class="chip amber">✉ No record</span>' : '');
+    return '<button class="item" data-hrow="' + x[HI.row] + '"><div class="item-top">' + dateBox(x[HI.start]) + '<div class="item-main"><div class="item-title">' + esc(x[HI.office]) + '</div>' +
+      '<div class="item-sub">' + (a === 'Approved' ? '👤 ' + esc(title(x[HI.insp]) || '-') : '✖ ' + esc(x[HI.why] || a)) + '</div>' +
+      (x[HI.goods] ? '<div class="item-sub">📦 ' + esc(x[HI.goods]) + '</div>' : '') +
+      '<div class="meta">' + chip + (a === 'Approved' && x[HI.resp] === 'Declined' ? '<span class="chip red">Inspector declined</span>' : '') +
+      '<span class="chip gold">' + esc(x[HI.ref] || '-') + '</span>' + (x[HI.by] ? '<span class="chip">by ' + esc(x[HI.by]) + '</span>' : '') + mail + '</div></div></div></button>';
+  }
+  function renderHistory() {
+    load('history', 'history', function (r) {
+      if (state.tab !== 'history') return;
+      if (!r.ok) return failView(r);
+      var items = r.items || [], f = state.hist;
+      var months = []; items.forEach(function (x) { var m = histMonth(x[HI.start]); if (m && months.indexOf(m) < 0) months.push(m); });
+      var html = '<div class="searchbox"><span>🔍</span><input type="search" id="hq" autocomplete="off" placeholder="Search office, reference, inspector, goods or PO" value="' + esc(f.q) + '">' +
+        '<button id="hqx" aria-label="Clear"' + (f.q ? '' : ' class="hidden"') + '>×</button></div>' +
+        '<div class="filters">' + [['all', 'All'], ['Approved', 'Approved'], ['Denied', 'Denied'], ['Cancelled', 'Cancelled']].map(function (o) {
+          return '<button data-hs="' + o[0] + '" class="' + (f.status === o[0] ? 'on' : '') + '">' + o[1] + '</button>'; }).join('') +
+        '<button data-hm="1" class="' + (f.mailIssue ? 'on' : '') + '">✉ Email problems</button></div>' +
+        '<div class="field" style="margin:0 0 10px"><select id="hmonth"><option value="">All months (by inspection date)</option>' +
+        months.map(function (m) { return '<option value="' + m + '"' + (f.month === m ? ' selected' : '') + '>' + histMonthLabel(m) + '</option>'; }).join('') + '</select></div>' +
+        '<div id="hlist"></div>';
+      $('view').innerHTML = html;
+      function drawList(keep) {
+        if (!keep) f.shown = 30;
+        var list = histFilter(items), c = { Approved: 0, Denied: 0, Cancelled: 0 };
+        list.forEach(function (x) { c[x[HI.action]] = (c[x[HI.action]] || 0) + 1; });
+        var h = '<p class="hint" style="margin:0 0 8px">' + list.length + ' request' + (list.length === 1 ? '' : 's') + ' · ' + c.Approved + ' approved · ' + c.Denied + ' denied · ' + c.Cancelled + ' cancelled' +
+          (f.mailIssue ? '<br>Email problems: emails that failed, or decisions since Nov 11, 2026 with no email record.' : '') + '</p>';
+        h += list.length ? '<div class="list">' + list.slice(0, f.shown).map(histCard).join('') + '</div>' : emptyArt('No requests match these filters.');
+        if (list.length > f.shown) h += '<button class="btn ghost" id="hmore" style="margin-top:12px">Show more (' + (list.length - f.shown) + ' left)</button>';
+        $('hlist').innerHTML = h;
+        Array.prototype.forEach.call(document.querySelectorAll('[data-hrow]'), function (b) { b.onclick = function () { histSheet(+b.getAttribute('data-hrow')); }; });
+        if ($('hmore')) $('hmore').onclick = function () { f.shown += 30; drawList(true); };
+      }
+      drawList(true);
+      var qi = $('hq');
+      qi.oninput = function () { f.q = qi.value; $('hqx').classList.toggle('hidden', !qi.value); drawList(); };
+      $('hqx').onclick = function () { qi.value = ''; qi.oninput(); };
+      $('hmonth').onchange = function () { f.month = this.value; drawList(); };
+      Array.prototype.forEach.call(document.querySelectorAll('[data-hs]'), function (b) { b.onclick = function () { f.status = b.getAttribute('data-hs'); renderHistory(); }; });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-hm]'), function (b) { b.onclick = function () { f.mailIssue = !f.mailIssue; renderHistory(); }; });
+    });
+  }
+  window.addEventListener('scroll', function () {
+    if (state.tab === 'history' && $('hmore') && window.innerHeight + window.scrollY > document.body.scrollHeight - 300) $('hmore').click();
+  }, { passive: true });
+  function histSheet(row) {
+    openSheet('<div class="empty">Loading…</div>');
+    call('histItem', { row: row }).then(function (r) {
+      if (!r.ok) { closeSheet(); return toast(r.error, true); }
+      var q = r.request, a = q.action;
+      var h = '<h3>' + esc(q.office) + '</h3>' +
+        '<div class="meta" style="margin:-6px 0 10px">' + (a === 'Approved' ? '<span class="chip green">Approved</span>' : '<span class="chip red">' + esc(a) + '</span>') +
+        '<span class="chip gold">' + esc(q.ref || '-') + '</span>' + (q.assignor ? '<span class="chip">by ' + esc(q.assignor) + '</span>' : '') + '</div>' +
+        '<dl class="kv"><dt>Schedule</dt><dd>' + esc(q.dateText) + ' · ' + esc(q.timeText) + '</dd>' +
+        '<dt>Venue</dt><dd>' + esc(q.place) + '</dd><dt>Goods</dt><dd>' + esc(q.goods) + '</dd>' +
+        (q.po ? '<dt>PO / Contract</dt><dd>' + esc(q.po) + '</dd>' : '') + (q.amountText ? '<dt>Amount</dt><dd>' + esc(q.amountText) + '</dd>' : '') +
+        '<dt>Requested by</dt><dd>' + esc(q.personnel) + '</dd><dt>Email</dt><dd>' + esc(q.reqEmail) + '</dd>' +
+        (a === 'Approved' ? '<dt>Inspector</dt><dd>' + esc(title(q.inspectorName)) + (q.response ? ' (' + (q.response === 'Confirmed' ? 'accepted' : esc(q.response.toLowerCase())) + ')' : '') + '</dd>' : '<dt>Reason</dt><dd>' + esc(q.deniedWhy || '-') + '</dd>') +
+        (q.findings ? '<dt>Findings</dt><dd>' + esc(q.findings) + '</dd>' : '') +
+        '<dt>Sheet row</dt><dd>' + q.row + '</dd></dl>';
+      h += mailNote(q);
+      if (q.air) h += '<button class="btn ghost" id="hAir" style="margin-bottom:10px">📄 View AIR (' + q.air + ' file' + (q.air === 1 ? '' : 's') + ')</button>';
+      if (q.photos && q.photoFolder) h += '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(q.photoFolder) + '" style="text-align:center;text-decoration:none;margin-bottom:10px">📷 Geotagged photos (' + q.photos + ')</a>';
+      if (a === 'Approved') h += toSection(q);
+      if (a === 'Approved' && (!q.start || q.start > Date.now() - 12 * 36e5)) h += '<div style="height:10px"></div><button class="btn primary" id="hManage">Change inspector or cancel</button>';
+      var s = openSheet(h);
+      if ($('hAir')) $('hAir').onclick = function () { airSheet(q, function () { histSheet(row); }); };
+      if ($('hManage')) $('hManage').onclick = function () { openRequest(row, true); };
+      if (a === 'Approved') wireTo(q, function () { histSheet(row); });
+    });
   }
 
   /* ============ LEADER: TEAM BOARD ============ */
