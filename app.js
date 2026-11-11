@@ -5,7 +5,7 @@
   'use strict';
   var CFG = window.HUB_CONFIG || {};
   var TZ = 'Asia/Manila';
-  var APP_VERSION = '37';
+  var APP_VERSION = '38';
   var KEY = { token: 'hub.token', me: 'hub.me', email: 'hub.email', push: 'hub.pushAt', installed: 'hub.installed' };
   var state = { token: null, me: null, tab: null, team: null, teamFilter: 'all' };
   var $ = function (id) { return document.getElementById(id); };
@@ -1372,6 +1372,15 @@
       return { when: p[0] || '', what: p[1] || '', sent: (p[2] || '').replace(/^Sent to: /, ''), bad: /NOT SENT/.test(l), notsent: (l.match(/NOT SENT: ([^|]*)/) || [])[1] || '', by: (l.match(/\| by (.*)$/) || [])[1] || '', test: /\[TEST/.test(l) };
     });
   }
+  /* decision record (Control Panel column BH): "Approved | Nov 11, 2026 9:24 AM | JAY-AR (app)" */
+  function decParse(l) { var p = String(l || '').split(' | '); return p.length >= 2 ? { what: p[0], when: p[1], by: (p[2] || '').replace(/ \((app|spreadsheet)\)$/, ''), via: ((p[2] || '').match(/\((app|spreadsheet)\)$/) || [])[1] || '' } : null; }
+  function decNote(q) {
+    var L = String(q.decLog || '').split('\n').filter(String).map(decParse).filter(Boolean);
+    if (!L.length) return '';
+    return '<div class="note blue"><b>🕘 ' + esc(L[0].what) + ' on ' + esc(L[0].when) + '</b>by ' + esc(L[0].by) + (L[0].via === 'spreadsheet' ? ' (in the spreadsheet)' : '') +
+      (L.length > 1 ? '<details style="margin-top:6px"><summary class="hint" style="cursor:pointer;margin:0">Earlier (' + (L.length - 1) + ')</summary>' +
+        L.slice(1).map(function (x) { return '<div class="hint" style="margin:4px 0">' + esc(x.what) + ' · ' + esc(x.when) + ' · ' + esc(x.by) + '</div>'; }).join('') + '</details>' : '') + '</div>';
+  }
   function mailChip(q) {
     var m = mailLines(q)[0];
     if (!m) return '';
@@ -1529,7 +1538,7 @@
         h += q.air ? '<div class="note green"><b>📎 Acceptance and Inspection Report attached</b>' + q.air + ' file' + (q.air === 1 ? '' : 's') + ' sent by the requestor.<button class="btn ghost" id="airBtn" style="margin-top:8px">📄 View AIR</button></div>'
           : '<div class="note red"><b>No AIR Attached</b>No Acceptance and Inspection Report has been sent yet. The requestor can send it here, no sign-in needed:<br><span style="word-break:break-all">' + esc(AIR_PAGE) + '</span><button class="btn ghost" id="airCopy" style="margin-top:8px">Copy link to send to the requestor</button></div>';
         if (q.warnings && q.warnings.length) h += '<div class="note amber"><b>Outside normal working hours/days</b>' + q.warnings.map(esc).join('<br>') + '<br>An approved request letter from the Local Chief Executive is needed.</div>';
-        if (reassign) h += mailNote(q) + toSection(q);
+        if (reassign) h += decNote(q) + mailNote(q) + toSection(q);
         if (reassign && q.response === 'Declined') h += '<div class="note red"><b>' + esc(title(q.inspectorName)) + ' can\'t do this inspection.</b>' + esc(q.respWhy || 'No reason given') + '<br>Choose a new inspector below, or cancel the inspection.</div>';
         else if (reassign) h += '<div class="note green"><b>Approved · ' + esc(q.ref || '') + '</b>Assigned to ' + esc(title(q.inspectorName)) + (q.response === 'Confirmed' ? ' (accepted)' : ' (not yet accepted)') + '. You can change the inspector or cancel the inspection.</div>';
         if (q.start && q.start < Date.now()) h += '<div class="note red"><b>The requested schedule has already passed.</b>Check with the requesting office before approving.</div>';
@@ -1749,7 +1758,7 @@
   /* ============ LEADER: HISTORY ============
      All approved, denied and cancelled requests, newest first. The whole list is kept on the
      phone, so filters and search are instant; 30 are drawn at a time. */
-  var HI = { row: 0, start: 1, office: 2, ref: 3, action: 4, insp: 5, goods: 6, po: 7, mail: 8, why: 9, by: 10, resp: 11, date: 12, time: 13, tracked: 14 };
+  var HI = { row: 0, start: 1, office: 2, ref: 3, action: 4, insp: 5, goods: 6, po: 7, mail: 8, why: 9, by: 10, resp: 11, date: 12, time: 13, tracked: 14, dec: 15 };
   state.hist = { status: 'all', q: '', month: '', mailIssue: false, shown: 30 };
   function histMonth(ms) { return ms ? new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit' }).format(new Date(ms)) : ''; }
   function histMonthLabel(ym) { var p = ym.split('-'); return new Date(+p[0], +p[1] - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }); }
@@ -1758,7 +1767,7 @@
     return items.filter(function (x) {
       if (f.status !== 'all' && x[HI.action] !== f.status) return false;
       if (f.month && histMonth(x[HI.start]) !== f.month) return false;
-      if (f.mailIssue && !(x[HI.mail] === 2 || (x[HI.mail] === 0 && x[HI.tracked]))) return false;
+      if (f.mailIssue && !(x[HI.mail] === 2 || (x[HI.mail] === 0 && (x[HI.tracked] || /\(spreadsheet\)$/.test(x[HI.dec] || ''))))) return false;
       if (words.length) {
         var hay = (x[HI.office] + ' ' + x[HI.ref] + ' ' + x[HI.insp] + ' ' + x[HI.goods] + ' ' + x[HI.po] + ' ' + x[HI.why] + ' ' + x[HI.by]).toLowerCase();
         for (var i = 0; i < words.length; i++) if (hay.indexOf(words[i]) < 0) return false;
@@ -1769,10 +1778,11 @@
   function histCard(x) {
     var a = x[HI.action];
     var chip = a === 'Approved' ? '<span class="chip green">Approved</span>' : a === 'Denied' ? '<span class="chip red">Denied</span>' : '<span class="chip red">Cancelled</span>';
-    var mail = x[HI.mail] === 1 ? '<span class="chip green">✉ Sent</span>' : x[HI.mail] === 3 ? '<span class="chip">✉ Test</span>' : x[HI.mail] === 2 ? '<span class="chip red">✉ Not sent</span>' : (x[HI.tracked] ? '<span class="chip amber">✉ No record</span>' : '');
+    var mail = x[HI.mail] === 1 ? '<span class="chip green">✉ Sent</span>' : x[HI.mail] === 3 ? '<span class="chip">✉ Test</span>' : x[HI.mail] === 2 ? '<span class="chip red">✉ Not sent</span>' : ((x[HI.tracked] || /\(spreadsheet\)$/.test(x[HI.dec] || '')) ? '<span class="chip amber">✉ No record</span>' : '');
     return '<button class="item" data-hrow="' + x[HI.row] + '"><div class="item-top">' + dateBox(x[HI.start]) + '<div class="item-main"><div class="item-title">' + esc(x[HI.office]) + '</div>' +
       '<div class="item-sub">' + (a === 'Approved' ? '👤 ' + esc(title(x[HI.insp]) || '-') : '✖ ' + esc(x[HI.why] || a)) + '</div>' +
       (x[HI.goods] ? '<div class="item-sub">📦 ' + esc(x[HI.goods]) + '</div>' : '') +
+      (decParse(x[HI.dec]) ? '<div class="item-sub">🕘 ' + esc(decParse(x[HI.dec]).what) + ' ' + esc(decParse(x[HI.dec]).when) + '</div>' : '') +
       '<div class="meta">' + chip + (a === 'Approved' && x[HI.resp] === 'Declined' ? '<span class="chip red">Inspector declined</span>' : '') +
       '<span class="chip gold">' + esc(x[HI.ref] || '-') + '</span>' + (x[HI.by] ? '<span class="chip">by ' + esc(x[HI.by]) + '</span>' : '') + mail + '</div></div></div></button>';
   }
@@ -1830,7 +1840,7 @@
         (a === 'Approved' ? '<dt>Inspector</dt><dd>' + esc(title(q.inspectorName)) + (q.response ? ' (' + (q.response === 'Confirmed' ? 'accepted' : esc(q.response.toLowerCase())) + ')' : '') + '</dd>' : '<dt>Reason</dt><dd>' + esc(q.deniedWhy || '-') + '</dd>') +
         (q.findings ? '<dt>Findings</dt><dd>' + esc(q.findings) + '</dd>' : '') +
         '<dt>Sheet row</dt><dd>' + q.row + '</dd></dl>';
-      h += mailNote(q);
+      h += decNote(q) + mailNote(q);
       if (q.air) h += '<button class="btn ghost" id="hAir" style="margin-bottom:10px">📄 View AIR (' + q.air + ' file' + (q.air === 1 ? '' : 's') + ')</button>';
       if (q.photos && q.photoFolder) h += '<a class="btn ghost" target="_blank" rel="noopener" href="' + esc(q.photoFolder) + '" style="text-align:center;text-decoration:none;margin-bottom:10px">📷 Geotagged photos (' + q.photos + ')</a>';
       if (a === 'Approved') h += toSection(q);
